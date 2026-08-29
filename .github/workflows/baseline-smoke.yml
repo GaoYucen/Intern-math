@@ -1,0 +1,90 @@
+name: baseline-smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/baseline-smoke.yml"
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Intern model id"
+        required: false
+        default: "intern-s2-preview"
+      mode:
+        description: "Agent mode: direct or self_refine"
+        required: false
+        default: "direct"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: ${{ github.event.inputs.model || 'intern-s2-preview' }}
+      AGENT_MODE: ${{ github.event.inputs.mode || 'direct' }}
+      INTERN_THINKING_MODE: "1"
+      LOCAL_MAX_CONCURRENCY: "3"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Run unit tests
+        run: pytest -q
+      - name: Verify API key is configured
+        run: |
+          if [ -z "$INTERN_API_KEY" ]; then
+            echo "INTERN_API_KEY repository secret is not configured."
+            exit 2
+          fi
+      - name: Build 17-domain representative smoke subset
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          input_rows = [json.loads(x) for x in Path('data/benchmark_v1/input.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
+          gold_rows = [json.loads(x) for x in Path('data/benchmark_v1/gold.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
+          assert len(input_rows) == len(gold_rows) == 340
+          selected = list(range(0, 340, 20))
+          Path('tmp').mkdir(exist_ok=True)
+          with Path('tmp/smoke_input.jsonl').open('w', encoding='utf-8') as f:
+              for idx in selected:
+                  f.write(json.dumps(input_rows[idx], ensure_ascii=False) + '\n')
+          with Path('tmp/smoke_gold.jsonl').open('w', encoding='utf-8') as f:
+              for idx in selected:
+                  f.write(json.dumps(gold_rows[idx], ensure_ascii=False) + '\n')
+          print('selected idx:', selected)
+          print('domains:', [gold_rows[i].get('domain') for i in selected])
+          PY
+      - name: Run direct baseline smoke
+        run: |
+          rm -rf outputs/smoke reports/smoke
+          python main.py --input_file tmp/smoke_input.jsonl --output_dir outputs/smoke
+      - name: Evaluate smoke outputs
+        if: always()
+        run: |
+          python scripts/evaluate_outputs.py \
+            --benchmark tmp/smoke_gold.jsonl \
+            --output_dir outputs/smoke \
+            --report_dir reports/smoke || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: baseline-smoke-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            tmp/smoke_input.jsonl
+            tmp/smoke_gold.jsonl
+            outputs/smoke
+            reports/smoke
