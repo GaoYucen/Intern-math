@@ -14,11 +14,7 @@ def _format_options(options: Any) -> tuple[str, dict[str, Any]]:
 
 
 def normalize_orqa(item: Mapping[str, Any], source_id: Any) -> Optional[dict]:
-    """Normalize ORQA into a competition-shaped multiple-choice candidate.
-
-    ORQA TARGET_ANSWER is a zero-based option index.  The context and question
-    are concatenated because neither is self-contained alone.
-    """
+    """Normalize ORQA into a competition-shaped multiple-choice candidate."""
     option_text, option_map = _format_options(item.get("OPTIONS"))
     context = normalize_problem_text(item.get("CONTEXT"))
     question = normalize_problem_text(item.get("QUESTION"))
@@ -78,12 +74,7 @@ def _deepmath_answer_type(answer: Any) -> str:
 
 
 def normalize_deepmath_gap(item: Mapping[str, Any], source_id: Any) -> Optional[dict]:
-    """Use DeepMath only as a gap-filling candidate source.
-
-    This adapter deliberately ignores the many already-covered DeepMath topics.
-    Rows remain pending and require human review because topic annotations and
-    gold expressions in large aggregated math corpora can be noisy.
-    """
+    """Use DeepMath only as a secondary gap-filling candidate source."""
     if item.get("processing_success") is False:
         return None
     domain = deepmath_gap_domain(item.get("topic"))
@@ -101,6 +92,72 @@ def normalize_deepmath_gap(item: Mapping[str, Any], source_id: Any) -> Optional[
         source_meta={
             "topic": item.get("topic"),
             "failed_count": item.get("failed_count"),
-            "selection_role": "gap_filling_only",
+            "selection_role": "secondary_gap_filling",
+        },
+    )
+
+
+def normalize_ma_proofbench(item: Mapping[str, Any]) -> Optional[dict]:
+    """Normalize expert-reviewed MA-ProofBench gap domains.
+
+    MA-ProofBench supplies a natural-language problem and an independently
+    expert-reviewed Lean formalization.  It does not provide an informal gold
+    proof, so the formal theorem statement is kept as the proof specification
+    in the gold file and these rows must be judged separately from exact-answer
+    questions.
+    """
+    topic = str(item.get("topic") or "").strip().lower()
+    if topic in {"functional analysis", "operator theory"}:
+        domain = "functional_analysis"
+    elif topic in {"measure and integration", "measure & integration"}:
+        domain = "measure_theory"
+    else:
+        return None
+    problem = normalize_problem_text(item.get("informal_statement"))
+    formal = normalize_problem_text(item.get("formal_statement"))
+    if not problem or not formal:
+        return None
+    return make_row(
+        problem=problem,
+        answer=formal,
+        answer_type="proof",
+        domain=domain,
+        source_dataset="ma_proofbench",
+        source_id=item.get("id", ""),
+        difficulty=item.get("split"),
+        source_meta={
+            "split": item.get("split"),
+            "topic": item.get("topic"),
+            "tag": item.get("tag"),
+            "formal_statement": formal,
+            "mathlib_version": item.get("version"),
+            "selection_role": "expert_reviewed_gap_filling",
+            "proof_gold_kind": "formal_theorem_specification",
+        },
+    )
+
+
+def normalize_hardmath2(item: Mapping[str, Any]) -> Optional[dict]:
+    """Keep only HARDMath2's peer-verified nonlinear PDE problems."""
+    kind = str(item.get("type") or "").strip().lower()
+    if kind not in {"nonlinear_pde", "nonlinear_pdes"}:
+        return None
+    problem = normalize_problem_text(item.get("prompt"))
+    solution = normalize_problem_text(item.get("solution"))
+    if not problem or not solution:
+        return None
+    return make_row(
+        problem=problem,
+        answer=solution,
+        answer_type="symbolic",
+        domain="pde",
+        source_dataset="hardmath2",
+        source_id=item.get("index", ""),
+        difficulty="graduate",
+        solution=solution,
+        source_meta={
+            "type": item.get("type"),
+            "parameters": item.get("parameters"),
+            "selection_role": "peer_verified_pde",
         },
     )
