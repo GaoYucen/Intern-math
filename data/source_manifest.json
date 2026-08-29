@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "id": "theoremqa",
+      "upstream": "https://github.com/TIGER-AI-Lab/TheoremQA",
+      "license": "MIT",
+      "selection": "field=Math; supported subfields only",
+      "role": "university-level theorem-driven QA"
+    },
+    {
+      "id": "proofnet_verified",
+      "upstream": "https://github.com/marcusm117/ProofNet-Verified",
+      "license": "Apache-2.0",
+      "selection": "natural-language statements with mappable textbook/topic",
+      "role": "undergraduate proof subset; score separately"
+    },
+    {
+      "id": "scibench",
+      "upstream": "https://github.com/mandyyyyii/scibench",
+      "license": "MIT",
+      "selection": "calculus.json and diff.json",
+      "role": "college textbook calculation/reasoning problems"
+    },
+    {
+      "id": "supergpqa",
+      "upstream": "https://huggingface.co/datasets/m-a-p/SuperGPQA",
+      "license": "ODC-BY",
+      "selection": "discipline=Mathematics and mappable field/subfield",
+      "role": "graduate-level multiple-choice coverage"
+    }
+  ]
+}
