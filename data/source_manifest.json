@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "sources": [
     {
       "id": "theoremqa",
@@ -13,7 +13,7 @@
       "upstream": "https://github.com/marcusm117/ProofNet-Verified",
       "license": "Apache-2.0",
       "selection": "natural-language statements with mappable textbook/topic",
-      "role": "undergraduate proof subset; score separately"
+      "role": "verified undergraduate proof problems"
     },
     {
       "id": "scibench",
@@ -26,8 +26,8 @@
       "id": "supergpqa",
       "upstream": "https://huggingface.co/datasets/m-a-p/SuperGPQA",
       "license": "ODC-BY",
-      "selection": "discipline=Science; field=Mathematics; mappable subfield",
-      "role": "graduate-level multiple-choice coverage"
+      "selection": "discipline=Science; Mathematics plus mappable Statistics subfields",
+      "role": "graduate-level multiple-choice coverage including regression/statistics"
     },
     {
       "id": "orqa",
@@ -37,11 +37,29 @@
       "role": "expert-authored operations-research reasoning coverage"
     },
     {
+      "id": "ma_proofbench",
+      "upstream": "https://github.com/OpenBMB/MA-ProofBench",
+      "license": "MIT",
+      "selection": "Functional Analysis, Operator Theory, Measure and Integration topics",
+      "role": "expert-reviewed undergraduate/PhD proof coverage for functional analysis and measure theory"
+    },
+    {
+      "id": "hardmath2",
+      "upstream": "https://huggingface.co/datasets/JVRoggeveen/HARDMath2",
+      "license": "MIT",
+      "selection": "type=nonlinear_pde only",
+      "role": "student/instructor peer-verified graduate PDE problems with reference solutions"
+    },
+    {
       "id": "deepmath_gap",
       "upstream": "https://huggingface.co/datasets/pe-nlp/DeepMath-Magistral-stage1",
       "license": "derived-dataset-license-not-stated; original DeepMath-103K is MIT",
-      "selection": "only under-covered topic paths: PDE, differential geometry, measure theory, functional analysis, regression",
-      "role": "gap-filling candidate pool only; mandatory human review before Benchmark-v1"
+      "selection": "under-covered topic paths only; then strict problem-text semantic confirmation",
+      "role": "secondary gap source; only automatically approved rows are eligible"
     }
-  ]
+  ],
+  "review_policy": {
+    "method": "automatic_source_schema_semantic_v1",
+    "note": "Curated/verified sources are schema-checked; DeepMath additionally requires domain keywords in the problem text. Visual-dependent and malformed rows are rejected."
+  }
 }
