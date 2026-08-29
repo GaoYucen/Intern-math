@@ -23,18 +23,25 @@ from benchmark.adapters import (
     normalize_supergpqa,
     normalize_theoremqa,
 )
+from benchmark.gap_adapters import normalize_deepmath_gap, normalize_orqa
 from benchmark.io import write_jsonl
 
 THEOREMQA_URL = "https://raw.githubusercontent.com/TIGER-AI-Lab/TheoremQA/main/theoremqa_test.json"
 PROOFNET_URL = "https://raw.githubusercontent.com/marcusm117/ProofNet-Verified/main/data/proofnet-verified.jsonl"
 SCIBENCH_URL = "https://raw.githubusercontent.com/mandyyyyii/scibench/main/dataset/original/{name}.json"
+ORQA_URL = "https://raw.githubusercontent.com/nl4opt/ORQA/main/dataset/ORQA_{split}.jsonl"
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Prepare public math proxy datasets.")
+    p.add_argument(
+        "--sources",
+        default="theoremqa,proofnet,scibench,supergpqa,orqa,deepmath_gap",
+        help="comma-separated source ids",
+    )
     p.add_argument("--output-dir", default="data/public_candidates")
-    p.add_argument("--sources", default="theoremqa,proofnet,scibench,supergpqa")
     p.add_argument("--supergpqa-dataset", default="m-a-p/SuperGPQA")
+    p.add_argument("--deepmath-dataset", default="pe-nlp/DeepMath-Magistral-stage1")
     p.add_argument("--limit-per-source", type=int, default=0)
     p.add_argument("--smoke", action="store_true", help="cap each source at 50 normalized rows")
     p.add_argument("--timeout", type=int, default=60)
@@ -70,6 +77,25 @@ def _cap(rows: Iterable[dict | None], limit: int) -> list[dict]:
     return out
 
 
+def _stream_hf(dataset_id: str):
+    try:
+        from datasets import load_dataset
+    except ImportError as exc:
+        raise SystemExit("Install data dependencies: pip install -r requirements-data.txt") from exc
+
+    dataset = None
+    last_error: Exception | None = None
+    for split in ("train", "test", "validation"):
+        try:
+            dataset = load_dataset(dataset_id, split=split, streaming=True)
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+    if dataset is None:
+        raise RuntimeError(f"Unable to stream {dataset_id}: {last_error}")
+    return dataset
+
+
 def load_theoremqa(timeout: int, limit: int) -> list[dict]:
     return _cap((normalize_theoremqa(x) for x in _get_json(THEOREMQA_URL, timeout)), limit)
 
@@ -91,22 +117,27 @@ def load_scibench(timeout: int, limit: int) -> list[dict]:
 
 
 def load_supergpqa(dataset_id: str, limit: int) -> list[dict]:
-    try:
-        from datasets import load_dataset
-    except ImportError as exc:
-        raise SystemExit("Install data dependencies: pip install -r requirements-data.txt") from exc
+    return _cap((normalize_supergpqa(x) for x in _stream_hf(dataset_id)), limit)
 
-    dataset = None
-    last_error: Exception | None = None
-    for split in ("train", "test"):
-        try:
-            dataset = load_dataset(dataset_id, split=split, streaming=True)
-            break
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-    if dataset is None:
-        raise RuntimeError(f"Unable to stream {dataset_id}: {last_error}")
-    return _cap((normalize_supergpqa(x) for x in dataset), limit)
+
+def load_orqa(timeout: int, limit: int) -> list[dict]:
+    rows: list[dict] = []
+    # Validation first because it includes expert reasoning; test adds scale.
+    for split in ("validation", "test"):
+        for line_idx, item in enumerate(_get_jsonl(ORQA_URL.format(split=split), timeout)):
+            row = normalize_orqa(item, f"{split}:{line_idx}")
+            if row is not None:
+                rows.append(row)
+                if limit and len(rows) >= limit:
+                    return rows
+    return rows
+
+
+def load_deepmath_gap(dataset_id: str, limit: int) -> list[dict]:
+    return _cap(
+        (normalize_deepmath_gap(item, f"train:{idx}") for idx, item in enumerate(_stream_hf(dataset_id))),
+        limit,
+    )
 
 
 def summarize(rows: list[dict]) -> dict:
@@ -121,7 +152,7 @@ def summarize(rows: list[dict]) -> dict:
 def main() -> None:
     args = parse_args()
     requested = {x.strip().lower() for x in args.sources.split(",") if x.strip()}
-    valid = {"theoremqa", "proofnet", "scibench", "supergpqa"}
+    valid = {"theoremqa", "proofnet", "scibench", "supergpqa", "orqa", "deepmath_gap"}
     unknown = requested - valid
     if unknown:
         raise SystemExit(f"Unknown sources: {', '.join(sorted(unknown))}")
@@ -139,6 +170,10 @@ def main() -> None:
         loaded["scibench"] = load_scibench(args.timeout, limit)
     if "supergpqa" in requested:
         loaded["supergpqa"] = load_supergpqa(args.supergpqa_dataset, limit)
+    if "orqa" in requested:
+        loaded["orqa"] = load_orqa(args.timeout, limit)
+    if "deepmath_gap" in requested:
+        loaded["deepmath_gap"] = load_deepmath_gap(args.deepmath_dataset, limit)
 
     merged: list[dict] = []
     report: dict[str, Any] = {"sources": {}}
