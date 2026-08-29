@@ -27,7 +27,7 @@
       "upstream": "https://huggingface.co/datasets/m-a-p/SuperGPQA",
       "license": "ODC-BY",
       "selection": "discipline=Science; Mathematics plus mappable Statistics subfields",
-      "role": "graduate-level multiple-choice coverage including regression/statistics"
+      "role": "graduate-level multiple-choice coverage"
     },
     {
       "id": "orqa",
@@ -41,14 +41,21 @@
       "upstream": "https://github.com/OpenBMB/MA-ProofBench",
       "license": "MIT",
       "selection": "Functional Analysis, Operator Theory, Measure and Integration topics",
-      "role": "expert-reviewed undergraduate/PhD proof coverage for functional analysis and measure theory"
+      "role": "expert-reviewed proof coverage for functional analysis and measure theory"
     },
     {
       "id": "hardmath2",
       "upstream": "https://huggingface.co/datasets/JVRoggeveen/HARDMath2",
       "license": "MIT",
       "selection": "type=nonlinear_pde only",
-      "role": "student/instructor peer-verified graduate PDE problems with reference solutions"
+      "role": "peer-verified graduate PDE problems with reference solutions"
+    },
+    {
+      "id": "mmlu_regression",
+      "upstream": "https://huggingface.co/datasets/cais/mmlu",
+      "license": "MIT",
+      "selection": "econometrics + high_school_statistics; retain only questions/options with explicit regression, least-squares, residual, OLS, R-squared, multicollinearity, heteroskedasticity or omitted-variable concepts",
+      "role": "targeted regression-analysis gap coverage"
     },
     {
       "id": "deepmath_gap",
@@ -60,6 +67,6 @@
   ],
   "review_policy": {
     "method": "automatic_source_schema_semantic_v1",
-    "note": "Curated/verified sources are schema-checked; DeepMath additionally requires domain keywords in the problem text. Visual-dependent and malformed rows are rejected."
+    "note": "Curated/verified sources are schema-checked. MMLU regression and DeepMath additionally require explicit semantic topic confirmation. Visual-dependent and malformed rows are rejected."
   }
 }
