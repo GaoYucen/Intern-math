@@ -1,0 +1,87 @@
+name: baseline-full
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Intern model id"
+        required: false
+        default: "intern-s2-preview"
+      mode:
+        description: "Agent mode: direct or self_refine"
+        required: false
+        default: "direct"
+      concurrency:
+        description: "Local API concurrency"
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: ${{ github.event.inputs.model || 'intern-s2-preview' }}
+      AGENT_MODE: ${{ github.event.inputs.mode || 'direct' }}
+      INTERN_THINKING_MODE: "1"
+      LOCAL_MAX_CONCURRENCY: ${{ github.event.inputs.concurrency || '3' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Run unit tests
+        run: pytest -q
+      - name: Verify API key is configured
+        run: |
+          if [ -z "$INTERN_API_KEY" ]; then
+            echo "INTERN_API_KEY repository secret is not configured."
+            exit 2
+          fi
+      - name: Record run metadata
+        run: |
+          mkdir -p reports/full
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          meta = {
+              "commit_sha": os.environ.get("GITHUB_SHA"),
+              "model": os.environ.get("INTERN_MODEL"),
+              "agent_mode": os.environ.get("AGENT_MODE"),
+              "thinking_mode": os.environ.get("INTERN_THINKING_MODE"),
+              "concurrency": os.environ.get("LOCAL_MAX_CONCURRENCY"),
+              "benchmark": "data/benchmark_v1/input.jsonl",
+          }
+          Path('reports/full/run_metadata.json').write_text(json.dumps(meta, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print(json.dumps(meta, indent=2))
+          PY
+      - name: Run Benchmark-v1
+        run: |
+          rm -rf outputs/full
+          python main.py \
+            --input_file data/benchmark_v1/input.jsonl \
+            --output_dir outputs/full
+      - name: Evaluate Benchmark-v1
+        if: always()
+        run: |
+          python scripts/evaluate_outputs.py \
+            --benchmark data/benchmark_v1/gold.jsonl \
+            --output_dir outputs/full \
+            --report_dir reports/full || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-v1-${{ github.event.inputs.model || 'intern-s2-preview' }}-${{ github.event.inputs.mode || 'direct' }}-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            outputs/full
+            reports/full
