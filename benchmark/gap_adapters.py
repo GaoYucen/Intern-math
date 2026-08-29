@@ -101,7 +101,7 @@ def normalize_ma_proofbench(item: Mapping[str, Any]) -> Optional[dict]:
     """Normalize expert-reviewed MA-ProofBench gap domains.
 
     MA-ProofBench supplies a natural-language problem and an independently
-    expert-reviewed Lean formalization.  It does not provide an informal gold
+    expert-reviewed Lean formalization. It does not provide an informal gold
     proof, so the formal theorem statement is kept as the proof specification
     in the gold file and these rows must be judged separately from exact-answer
     questions.
@@ -159,5 +159,54 @@ def normalize_hardmath2(item: Mapping[str, Any]) -> Optional[dict]:
             "type": item.get("type"),
             "parameters": item.get("parameters"),
             "selection_role": "peer_verified_pde",
+        },
+    )
+
+
+_MMLU_REGRESSION_TERMS = (
+    "regression", "least squares", "least-squares", "regression line",
+    "regression equation", "regression coefficient", "regressor",
+    "residual", "r-squared", "r squared", "coefficient of determination",
+    "ordinary least squares", "ols", "heteroskedastic", "heteroscedastic",
+    "multicollinearity", "omitted variable bias", "dummy variable",
+)
+
+
+def normalize_mmlu_regression(item: Mapping[str, Any], source_id: Any, subject: str) -> Optional[dict]:
+    """Extract an explicit regression/econometrics subset from MMLU.
+
+    We do not label all statistics/econometrics questions as regression. A row
+    is retained only when the question or options contains a regression-specific
+    concept. This keeps the proxy domain semantically narrow and auditable.
+    """
+    question = normalize_problem_text(item.get("question"))
+    choices = item.get("choices")
+    option_text, option_map = _format_options(choices)
+    if not question or not option_text:
+        return None
+    searchable = f"{question}\n{option_text}".lower()
+    if not any(term in searchable for term in _MMLU_REGRESSION_TERMS):
+        return None
+    try:
+        answer_index = int(item.get("answer"))
+    except (TypeError, ValueError):
+        return None
+    answer_letter = chr(ord("A") + answer_index)
+    if answer_letter not in option_map:
+        return None
+    problem = f"{question}\n\nOptions:\n{option_text}"
+    return make_row(
+        problem=problem,
+        answer=answer_letter,
+        answer_type="choice",
+        domain="regression_analysis",
+        source_dataset="mmlu_regression",
+        source_id=source_id,
+        difficulty="college" if subject == "econometrics" else "high_school",
+        source_meta={
+            "subject": subject,
+            "option_map": option_map,
+            "answer_index_zero_based": answer_index,
+            "selection_role": "explicit_regression_keyword_subset",
         },
     )
