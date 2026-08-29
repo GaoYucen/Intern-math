@@ -1,0 +1,170 @@
+name: finalize-b0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/finalize-b0.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview
+      AGENT_MODE: direct
+      INTERN_THINKING_MODE: "0"
+      AGENT_MAX_TOKENS: "4096"
+      LOCAL_MAX_CONCURRENCY: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Download original B0 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-v1-intern-s2-preview-direct-thinking-0-33254409750
+          path: b0_artifact
+          github-token: ${{ github.token }}
+          run-id: 33254409750
+
+      - name: Prepare final output directory and retry input
+        run: |
+          rm -rf outputs/final outputs/retry reports/b0 tmp/b0_retry_input.jsonl
+          mkdir -p outputs/final outputs/retry reports/b0 tmp
+          cp -r b0_artifact/outputs/full/. outputs/final/
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = [json.loads(x) for x in Path('data/benchmark_v1/input.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
+          failed = []
+          for row in rows:
+              p = Path('outputs/final') / f"{row['idx']}.json"
+              if not p.exists():
+                  failed.append(row)
+                  continue
+              result = json.loads(p.read_text(encoding='utf-8'))
+              if result.get('status') != 'success':
+                  failed.append(row)
+          with Path('tmp/b0_retry_input.jsonl').open('w', encoding='utf-8') as f:
+              for row in failed:
+                  f.write(json.dumps(row, ensure_ascii=False) + '\n')
+          print('retry idx:', [r['idx'] for r in failed])
+          print('retry count:', len(failed))
+          PY
+
+      - name: Retry failed B0 items at concurrency 1
+        run: |
+          if [ -s tmp/b0_retry_input.jsonl ]; then
+            python main.py --input_file tmp/b0_retry_input.jsonl --output_dir outputs/retry
+          else
+            echo "No failed items require retry."
+          fi
+
+      - name: Merge successful retries
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          merged = []
+          still_failed = []
+          for p in sorted(Path('outputs/retry').glob('*.json')):
+              result = json.loads(p.read_text(encoding='utf-8'))
+              idx = int(p.stem)
+              if result.get('status') == 'success':
+                  (Path('outputs/final') / p.name).write_text(
+                      json.dumps(result, ensure_ascii=False, indent=2) + '\n',
+                      encoding='utf-8',
+                  )
+                  merged.append(idx)
+              else:
+                  still_failed.append(idx)
+          print('merged retry success:', merged)
+          print('still failed:', still_failed)
+          PY
+
+      - name: Re-run deterministic evaluation
+        run: |
+          python scripts/evaluate_outputs.py \
+            --benchmark data/benchmark_v1/gold.jsonl \
+            --output_dir outputs/final \
+            --report_dir reports/b0/strict
+
+      - name: Reference-based adjudication of wrong/review items
+        env:
+          LOCAL_MAX_CONCURRENCY: "2"
+        run: |
+          python scripts/adjudicate_results.py \
+            --benchmark data/benchmark_v1/gold.jsonl \
+            --output_dir outputs/final \
+            --report_dir reports/b0/adjudicated \
+            --judge-model intern-s1-pro \
+            --fallback-model intern-s2-preview \
+            --concurrency 2
+
+      - name: Record B0 metadata
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('data/benchmark_v1/manifest.json').read_text(encoding='utf-8'))
+          meta = {
+              'participant_model': 'intern-s2-preview',
+              'participant_mode': 'direct',
+              'participant_thinking_mode': False,
+              'participant_max_tokens': 4096,
+              'original_run_id': 33254409750,
+              'retry_concurrency': 1,
+              'judge_primary_model': 'intern-s1-pro',
+              'judge_fallback_model': 'intern-s2-preview',
+              'benchmark_rows': manifest.get('n_rows'),
+              'benchmark_input_sha256': manifest.get('input_sha256'),
+              'benchmark_gold_sha256': manifest.get('gold_sha256'),
+          }
+          Path('reports/b0/run_metadata.json').write_text(
+              json.dumps(meta, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
+          )
+          PY
+
+      - name: Upload finalized B0 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: b0-finalized-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            outputs/final
+            outputs/retry
+            reports/b0
+            tmp/b0_retry_input.jsonl
+
+      - name: Commit compact B0 reports to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/b0
+          if git diff --cached --quiet; then
+            echo "No report changes to commit."
+          else
+            git commit -m "Record finalized B0 benchmark results"
+            git push
+          fi
