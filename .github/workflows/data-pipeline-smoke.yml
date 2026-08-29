@@ -1,0 +1,54 @@
+name: data-pipeline-smoke
+
+on:
+  push:
+    paths:
+      - "benchmark/adapters.py"
+      - "scripts/prepare_public_data.py"
+      - "scripts/make_review_queue.py"
+      - "scripts/export_competition_bundle.py"
+      - "requirements-data.txt"
+      - ".github/workflows/data-pipeline-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-data.txt
+          pip install pytest
+      - name: Unit tests
+        run: pytest -q
+      - name: Fetch and normalize public data
+        run: |
+          python scripts/prepare_public_data.py \
+            --smoke \
+            --output-dir tmp/public_smoke
+      - name: Build exploratory competition bundle
+        run: |
+          python scripts/make_review_queue.py \
+            tmp/public_smoke/all_public_candidates.jsonl \
+            --per-domain 3 \
+            --output tmp/review_queue.jsonl \
+            --csv-output tmp/review_queue.csv
+          python scripts/export_competition_bundle.py \
+            tmp/review_queue.jsonl \
+            --allow-unapproved \
+            --output-dir tmp/competition_bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-data-smoke
+          path: |
+            tmp/public_smoke
+            tmp/review_queue.jsonl
+            tmp/review_queue.csv
+            tmp/competition_bundle
