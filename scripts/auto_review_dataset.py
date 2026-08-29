@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """Automatically review normalized benchmark candidates with strict source rules.
 
-This is intentionally conservative.  It approves rows from curated/verified
+This is intentionally conservative. It approves rows from curated/verified
 sources after schema and self-containedness checks, and applies extra semantic
-filters to the noisier DeepMath gap source.  The script is deterministic so a
-frozen benchmark can be reproduced from the same upstream snapshots.
+filters to gap-filling sources. The script is deterministic so a frozen
+benchmark can be reproduced from the same upstream snapshots.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -31,6 +30,7 @@ TRUSTED_SOURCES = {
     "orqa",
     "ma_proofbench",
     "hardmath2",
+    "mmlu_regression",
 }
 
 PDE_TERMS = (
@@ -53,12 +53,14 @@ MEASURE_TERMS = (
     "radon-nikodym", "dominated convergence", "monotone convergence",
 )
 REGRESSION_TERMS = (
-    "regression", "least squares", "linear model", "glm", "generalized linear",
+    "regression", "least squares", "least-squares", "linear model", "regressor",
+    "residual", "r-squared", "r squared", "coefficient of determination", "ols",
+    "heteroskedastic", "heteroscedastic", "multicollinearity", "omitted variable bias",
 )
 
 IMAGE_PHRASES = (
     "shown in the figure", "see the figure", "shown in figure", "attached image",
-    "image below", "diagram below", "as shown below",
+    "image below", "diagram below",
 )
 
 
@@ -119,8 +121,6 @@ def review_row(row: dict[str, Any]) -> tuple[bool, str]:
     if not domain:
         return _reject("missing_domain")
     if any(phrase in problem.lower() for phrase in IMAGE_PHRASES):
-        # Some text explicitly depends on a visual that our competition-shaped
-        # input does not carry.  Reject rather than silently measuring OCR/image loss.
         return _reject("external_visual_dependency")
     if not _choice_is_consistent(row):
         return _reject("choice_answer_not_in_options")
@@ -143,6 +143,13 @@ def review_row(row: dict[str, Any]) -> tuple[bool, str]:
         if domain != "pde":
             return _reject("hardmath2_domain_mismatch")
         return True, "peer_verified_course_benchmark"
+
+    if source == "mmlu_regression":
+        if domain != "regression_analysis":
+            return _reject("mmlu_regression_domain_mismatch")
+        if not any(term in problem.lower() for term in REGRESSION_TERMS):
+            return _reject("mmlu_regression_keyword_missing")
+        return True, "mmlu_regression_explicit_topic_match"
 
     if source == "deepmath_gap":
         return _deepmath_semantic_check(row)
