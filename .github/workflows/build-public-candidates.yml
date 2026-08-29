@@ -1,0 +1,46 @@
+name: build-public-candidates
+
+on:
+  push:
+    paths:
+      - ".github/workflows/build-public-candidates.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install data dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-data.txt
+      - name: Normalize full public candidate pool
+        run: |
+          python scripts/prepare_public_data.py \
+            --output-dir tmp/public_candidates_full
+      - name: Create source-diverse review queue
+        run: |
+          python scripts/make_review_queue.py \
+            tmp/public_candidates_full/all_public_candidates.jsonl \
+            --per-domain 30 \
+            --output tmp/review_queue_v1.jsonl \
+            --csv-output tmp/review_queue_v1.csv
+      - name: Dataset audit
+        run: |
+          python scripts/audit_dataset.py \
+            tmp/public_candidates_full/all_public_candidates.jsonl \
+            --report tmp/public_candidates_full/audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-candidates-full
+          retention-days: 30
+          path: |
+            tmp/public_candidates_full
+            tmp/review_queue_v1.jsonl
+            tmp/review_queue_v1.csv
