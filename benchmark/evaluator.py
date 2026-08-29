@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 try:
     import sympy as sp
@@ -25,12 +25,16 @@ class Score:
     reason: str = ""
 
 
-def extract_final_answer(text: str) -> str:
-    """Extract the explicit final answer while retaining a safe fallback.
+def has_explicit_final_answer(text: str) -> bool:
+    if not isinstance(text, str):
+        return False
+    if any(pattern.search(text) for pattern in FINAL_PATTERNS):
+        return True
+    return bool(_extract_last_boxed(text))
 
-    The benchmark prompt asks for FINAL_ANSWER. If a model ignores it, using the
-    final non-empty line is safer than declaring failure immediately.
-    """
+
+def extract_final_answer(text: str) -> str:
+    """Extract the explicit final answer while retaining a conservative fallback."""
     if not isinstance(text, str):
         return ""
     matches = []
@@ -111,6 +115,15 @@ def _symbolically_equal(a: str, b: str) -> Optional[bool]:
         return None
 
 
+def _strict_choice_label(value: str) -> Optional[str]:
+    m = re.fullmatch(
+        r"\s*(?:option\s*)?[\(\[]?([A-Z])[\)\]\.]?\s*",
+        value,
+        flags=re.I,
+    )
+    return m.group(1).upper() if m else None
+
+
 def score_answer(
     prediction_text: str,
     gold: Any,
@@ -120,6 +133,7 @@ def score_answer(
     pred = extract_final_answer(prediction_text)
     gold_text = str(gold).strip()
     kind = (answer_type or "text").strip().lower()
+    explicit = has_explicit_final_answer(prediction_text)
 
     if kind in {"integer", "float", "numeric", "number", "rational"}:
         p = _to_float(pred)
@@ -141,20 +155,35 @@ def score_answer(
         return Score(p == g, pred, gold_text, kind)
 
     if kind in {"choice", "multiple_choice"}:
-        p = re.findall(r"\b([A-Z])\b", pred.upper())
+        if not explicit:
+            # A truncated derivation can contain many isolated A/B/C/... tokens.
+            # Do not accidentally score one of those as the answer. Only accept
+            # a strict standalone fallback label when no explicit final marker exists.
+            p_label = _strict_choice_label(pred)
+            if p_label is None:
+                return Score(None, pred, gold_text, kind, "missing explicit final choice")
+        else:
+            p = re.findall(r"\b([A-Z])\b", pred.upper())
+            if not p:
+                return Score(None, pred, gold_text, kind, "choice label parse failed")
+            p_label = p[-1]
+
         g = re.findall(r"\b([A-Z])\b", gold_text.upper())
-        if not p or not g:
-            return Score(None, pred, gold_text, kind, "choice label parse failed")
-        return Score(p[-1] == g[-1], pred, gold_text, kind)
+        if not g:
+            return Score(None, pred, gold_text, kind, "gold choice label parse failed")
+        return Score(p_label == g[-1], pred, gold_text, kind)
 
     if kind in {"bool", "boolean", "judgement", "true_false"}:
         def norm_bool(v: str) -> Optional[bool]:
             t = normalize_text(v)
-            if t in {"true", "yes", "正确", "对", "成立"}:
-                return True
-            if t in {"false", "no", "错误", "错", "不成立"}:
+            false_prefixes = ("false", "no", "incorrect", "错误", "错", "不成立")
+            true_prefixes = ("true", "yes", "correct", "正确", "对", "成立")
+            if t in false_prefixes or t.startswith(false_prefixes):
                 return False
+            if t in true_prefixes or t.startswith(true_prefixes):
+                return True
             return None
+
         p = norm_bool(pred)
         g = norm_bool(gold_text)
         if p is None or g is None:
