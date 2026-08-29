@@ -1,6 +1,10 @@
 name: baseline-full
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/baseline-full.yml"
   workflow_dispatch:
     inputs:
       model:
@@ -11,6 +15,14 @@ on:
         description: "Agent mode: direct or self_refine"
         required: false
         default: "direct"
+      thinking:
+        description: "Thinking mode: 0 or 1"
+        required: false
+        default: "0"
+      max_tokens:
+        description: "Maximum completion tokens"
+        required: false
+        default: "4096"
       concurrency:
         description: "Local API concurrency"
         required: false
@@ -27,7 +39,8 @@ jobs:
       INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
       INTERN_MODEL: ${{ github.event.inputs.model || 'intern-s2-preview' }}
       AGENT_MODE: ${{ github.event.inputs.mode || 'direct' }}
-      INTERN_THINKING_MODE: "1"
+      INTERN_THINKING_MODE: ${{ github.event.inputs.thinking || '0' }}
+      AGENT_MAX_TOKENS: ${{ github.event.inputs.max_tokens || '4096' }}
       LOCAL_MAX_CONCURRENCY: ${{ github.event.inputs.concurrency || '3' }}
     steps:
       - uses: actions/checkout@v4
@@ -53,13 +66,18 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
+          manifest = json.loads(Path('data/benchmark_v1/manifest.json').read_text(encoding='utf-8'))
           meta = {
               "commit_sha": os.environ.get("GITHUB_SHA"),
               "model": os.environ.get("INTERN_MODEL"),
               "agent_mode": os.environ.get("AGENT_MODE"),
               "thinking_mode": os.environ.get("INTERN_THINKING_MODE"),
+              "max_tokens": os.environ.get("AGENT_MAX_TOKENS"),
               "concurrency": os.environ.get("LOCAL_MAX_CONCURRENCY"),
               "benchmark": "data/benchmark_v1/input.jsonl",
+              "benchmark_input_sha256": manifest.get("input_sha256"),
+              "benchmark_gold_sha256": manifest.get("gold_sha256"),
+              "n_rows": manifest.get("n_rows"),
           }
           Path('reports/full/run_metadata.json').write_text(json.dumps(meta, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
           print(json.dumps(meta, indent=2))
@@ -80,7 +98,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: benchmark-v1-${{ github.event.inputs.model || 'intern-s2-preview' }}-${{ github.event.inputs.mode || 'direct' }}-${{ github.run_id }}
+          name: benchmark-v1-${{ github.event.inputs.model || 'intern-s2-preview' }}-${{ github.event.inputs.mode || 'direct' }}-thinking-${{ github.event.inputs.thinking || '0' }}-${{ github.run_id }}
           retention-days: 30
           path: |
             outputs/full
