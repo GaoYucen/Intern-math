@@ -1,16 +1,6 @@
 name: baseline-smoke
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/baseline-smoke.yml"
-      - "user_agent.py"
-      - "main.py"
-      - "llm_client.py"
-      - "benchmark/evaluator.py"
-      - "tests/**"
-      - "data/benchmark_v1/**"
   workflow_dispatch:
     inputs:
       model:
