@@ -1,5 +1,6 @@
 name: baseline-smoke
 
+# Re-run marker: API secret configured on 2026-08-29.
 on:
   push:
     branches: [main]
