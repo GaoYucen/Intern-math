@@ -23,24 +23,31 @@ from benchmark.adapters import (
     normalize_supergpqa,
     normalize_theoremqa,
 )
-from benchmark.gap_adapters import normalize_deepmath_gap, normalize_orqa
+from benchmark.gap_adapters import (
+    normalize_deepmath_gap,
+    normalize_hardmath2,
+    normalize_ma_proofbench,
+    normalize_orqa,
+)
 from benchmark.io import write_jsonl
 
 THEOREMQA_URL = "https://raw.githubusercontent.com/TIGER-AI-Lab/TheoremQA/main/theoremqa_test.json"
 PROOFNET_URL = "https://raw.githubusercontent.com/marcusm117/ProofNet-Verified/main/data/proofnet-verified.jsonl"
 SCIBENCH_URL = "https://raw.githubusercontent.com/mandyyyyii/scibench/main/dataset/original/{name}.json"
 ORQA_URL = "https://raw.githubusercontent.com/nl4opt/ORQA/main/dataset/ORQA_{split}.jsonl"
+MA_PROOFBENCH_URL = "https://raw.githubusercontent.com/OpenBMB/MA-ProofBench/main/benchmark/ma_proofbench.jsonl"
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Prepare public math proxy datasets.")
     p.add_argument(
         "--sources",
-        default="theoremqa,proofnet,scibench,supergpqa,orqa,deepmath_gap",
+        default="theoremqa,proofnet,scibench,supergpqa,orqa,ma_proofbench,hardmath2,deepmath_gap",
         help="comma-separated source ids",
     )
     p.add_argument("--output-dir", default="data/public_candidates")
     p.add_argument("--supergpqa-dataset", default="m-a-p/SuperGPQA")
+    p.add_argument("--hardmath2-dataset", default="JVRoggeveen/HARDMath2")
     p.add_argument("--deepmath-dataset", default="pe-nlp/DeepMath-Magistral-stage1")
     p.add_argument("--limit-per-source", type=int, default=0)
     p.add_argument("--smoke", action="store_true", help="cap each source at 50 normalized rows")
@@ -122,7 +129,6 @@ def load_supergpqa(dataset_id: str, limit: int) -> list[dict]:
 
 def load_orqa(timeout: int, limit: int) -> list[dict]:
     rows: list[dict] = []
-    # Validation first because it includes expert reasoning; test adds scale.
     for split in ("validation", "test"):
         for line_idx, item in enumerate(_get_jsonl(ORQA_URL.format(split=split), timeout)):
             row = normalize_orqa(item, f"{split}:{line_idx}")
@@ -131,6 +137,14 @@ def load_orqa(timeout: int, limit: int) -> list[dict]:
                 if limit and len(rows) >= limit:
                     return rows
     return rows
+
+
+def load_ma_proofbench(timeout: int, limit: int) -> list[dict]:
+    return _cap((normalize_ma_proofbench(x) for x in _get_jsonl(MA_PROOFBENCH_URL, timeout)), limit)
+
+
+def load_hardmath2(dataset_id: str, limit: int) -> list[dict]:
+    return _cap((normalize_hardmath2(x) for x in _stream_hf(dataset_id)), limit)
 
 
 def load_deepmath_gap(dataset_id: str, limit: int) -> list[dict]:
@@ -152,7 +166,10 @@ def summarize(rows: list[dict]) -> dict:
 def main() -> None:
     args = parse_args()
     requested = {x.strip().lower() for x in args.sources.split(",") if x.strip()}
-    valid = {"theoremqa", "proofnet", "scibench", "supergpqa", "orqa", "deepmath_gap"}
+    valid = {
+        "theoremqa", "proofnet", "scibench", "supergpqa", "orqa",
+        "ma_proofbench", "hardmath2", "deepmath_gap",
+    }
     unknown = requested - valid
     if unknown:
         raise SystemExit(f"Unknown sources: {', '.join(sorted(unknown))}")
@@ -172,6 +189,10 @@ def main() -> None:
         loaded["supergpqa"] = load_supergpqa(args.supergpqa_dataset, limit)
     if "orqa" in requested:
         loaded["orqa"] = load_orqa(args.timeout, limit)
+    if "ma_proofbench" in requested:
+        loaded["ma_proofbench"] = load_ma_proofbench(args.timeout, limit)
+    if "hardmath2" in requested:
+        loaded["hardmath2"] = load_hardmath2(args.hardmath2_dataset, limit)
     if "deepmath_gap" in requested:
         loaded["deepmath_gap"] = load_deepmath_gap(args.deepmath_dataset, limit)
 
