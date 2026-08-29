@@ -7,6 +7,7 @@ on:
       - "scripts/prepare_public_data.py"
       - "scripts/make_review_queue.py"
       - "scripts/export_competition_bundle.py"
+      - "tests/test_dataset_adapters.py"
       - "requirements-data.txt"
       - ".github/workflows/data-pipeline-smoke.yml"
   workflow_dispatch:
@@ -33,6 +34,14 @@ jobs:
           python scripts/prepare_public_data.py \
             --smoke \
             --output-dir tmp/public_smoke
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('tmp/public_smoke/coverage.json').read_text())
+          for source in ('theoremqa', 'proofnet_verified', 'scibench', 'supergpqa'):
+              assert report['sources'][source]['n_rows'] > 0, (source, report['sources'][source])
+          assert report['merged']['n_rows'] > 0
+          PY
       - name: Build exploratory competition bundle
         run: |
           python scripts/make_review_queue.py \
