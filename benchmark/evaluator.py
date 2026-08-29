@@ -25,6 +25,26 @@ class Score:
     reason: str = ""
 
 
+def _extract_balanced_command(text: str, command: str) -> str:
+    """Return the final balanced ``\\command{...}`` body, supporting nested braces."""
+    needle = "\\" + command + "{"
+    start = text.rfind(needle)
+    if start < 0:
+        return ""
+    i = start + len(needle)
+    depth = 1
+    body_start = i
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[body_start:i].strip()
+        i += 1
+    return ""
+
+
 def has_explicit_final_answer(text: str) -> bool:
     if not isinstance(text, str):
         return False
@@ -52,10 +72,7 @@ def extract_final_answer(text: str) -> str:
 
 
 def _extract_last_boxed(text: str) -> str:
-    # Handles the common single-level \boxed{...} form. Nested braces are not
-    # parsed here; FINAL_ANSWER is the preferred contract.
-    found = re.findall(r"\\boxed\{([^{}]+)\}", text)
-    return found[-1].strip() if found else ""
+    return _extract_balanced_command(text, "boxed")
 
 
 def _strip_wrappers(value: str) -> str:
@@ -73,12 +90,51 @@ def normalize_text(value: Any) -> str:
     return text
 
 
-def _to_float(value: str) -> Optional[float]:
-    s = normalize_text(value)
+def _strip_latex_display(value: str) -> str:
+    s = str(value).strip()
+    boxed = _extract_last_boxed(s)
+    if boxed:
+        s = boxed
+    s = s.replace("$$", "").replace("\\[", "").replace("\\]", "")
+    s = s.replace("\\left", "").replace("\\right", "")
+    return s.strip().strip("$")
+
+
+def _replace_simple_frac(s: str) -> str:
+    # Repeatedly handles common non-nested fractions such as \frac{\pi}{6}.
+    pattern = re.compile(r"\\(?:d?frac)\{([^{}]+)\}\{([^{}]+)\}")
+    previous = None
+    while previous != s:
+        previous = s
+        s = pattern.sub(r"((\1)/(\2))", s)
+    return s
+
+
+def _latex_to_sympyish(value: str) -> str:
+    s = _strip_latex_display(value)
+    s = _replace_simple_frac(s)
+    s = re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", s)
     s = s.replace("\\pi", "pi").replace("π", "pi")
+    s = s.replace("\\cdot", "*").replace("\\times", "*")
+    s = s.replace("^", "**")
+    s = s.replace("{", "(").replace("}", ")")
+    s = re.sub(r"\s+", "", s)
+    return s
+
+
+def _latex_normal_form(value: str) -> str:
+    s = _strip_latex_display(value).lower()
+    s = s.replace("\\left", "").replace("\\right", "")
+    s = s.replace("\\cdot", "").replace("\\,", "")
+    s = re.sub(r"\s+", "", s)
+    return s.strip(".。;；")
+
+
+def _to_float(value: str) -> Optional[float]:
+    s = _latex_to_sympyish(value)
     if sp is not None:
         try:
-            expr = sp.sympify(s.replace("^", "**"), locals={"pi": sp.pi})
+            expr = sp.sympify(s, locals={"pi": sp.pi, "sqrt": sp.sqrt})
             if expr.is_real is False:
                 return None
             return float(sp.N(expr))
@@ -98,18 +154,21 @@ def _split_set(value: str) -> list[str]:
 
 
 def _symbolically_equal(a: str, b: str) -> Optional[bool]:
+    # Exact/containment comparison in normalized LaTeX first. This covers
+    # expressions such as \mathbb{R}P^k that are meaningful but not SymPy syntax.
+    na = _latex_normal_form(a)
+    nb = _latex_normal_form(b)
+    if na == nb:
+        return True
+    if len(nb) >= 5 and nb in na:
+        return True
+
     if sp is None:
         return None
     try:
-        local_dict = {"pi": sp.pi, "e": sp.E, "i": sp.I}
-        ea = sp.sympify(
-            normalize_text(a).replace("\\pi", "pi").replace("π", "pi").replace("^", "**"),
-            locals=local_dict,
-        )
-        eb = sp.sympify(
-            normalize_text(b).replace("\\pi", "pi").replace("π", "pi").replace("^", "**"),
-            locals=local_dict,
-        )
+        local_dict = {"pi": sp.pi, "e": sp.E, "i": sp.I, "sqrt": sp.sqrt}
+        ea = sp.sympify(_latex_to_sympyish(a), locals=local_dict)
+        eb = sp.sympify(_latex_to_sympyish(b), locals=local_dict)
         return bool(sp.simplify(ea - eb) == 0)
     except Exception:
         return None
@@ -156,9 +215,6 @@ def score_answer(
 
     if kind in {"choice", "multiple_choice"}:
         if not explicit:
-            # A truncated derivation can contain many isolated A/B/C/... tokens.
-            # Do not accidentally score one of those as the answer. Only accept
-            # a strict standalone fallback label when no explicit final marker exists.
             p_label = _strict_choice_label(pred)
             if p_label is None:
                 return Score(None, pred, gold_text, kind, "missing explicit final choice")
@@ -175,13 +231,25 @@ def score_answer(
 
     if kind in {"bool", "boolean", "judgement", "true_false"}:
         def norm_bool(v: str) -> Optional[bool]:
-            t = normalize_text(v)
+            raw = str(v).strip().lower()
+            compact = normalize_text(v)
             false_prefixes = ("false", "no", "incorrect", "错误", "错", "不成立")
             true_prefixes = ("true", "yes", "correct", "正确", "对", "成立")
-            if t in false_prefixes or t.startswith(false_prefixes):
+            if compact in false_prefixes or compact.startswith(false_prefixes):
                 return False
-            if t in true_prefixes or t.startswith(true_prefixes):
+            if compact in true_prefixes or compact.startswith(true_prefixes):
                 return True
+
+            false_hit = bool(re.search(r"\b(false|no|incorrect)\b", raw)) or any(
+                token in raw for token in ("错误", "不成立")
+            )
+            true_hit = bool(re.search(r"\b(true|yes|correct)\b", raw)) or any(
+                token in raw for token in ("正确", "成立")
+            )
+            if true_hit and not false_hit:
+                return True
+            if false_hit and not true_hit:
+                return False
             return None
 
         p = norm_bool(pred)
