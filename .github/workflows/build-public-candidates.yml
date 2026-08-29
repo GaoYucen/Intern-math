@@ -3,6 +3,12 @@ name: build-public-candidates
 on:
   push:
     paths:
+      - "benchmark/adapters.py"
+      - "benchmark/gap_adapters.py"
+      - "scripts/prepare_public_data.py"
+      - "scripts/make_review_queue.py"
+      - "scripts/audit_dataset.py"
+      - "requirements-data.txt"
       - ".github/workflows/build-public-candidates.yml"
   workflow_dispatch:
 
