@@ -1,3 +1,4 @@
+import math
 import unittest
 
 from benchmark.evaluator import extract_final_answer, score_answer
@@ -11,6 +12,14 @@ class EvaluatorTest(unittest.TestCase):
         s = score_answer("FINAL_ANSWER: 2*pi", "2*pi", "numeric")
         self.assertTrue(s.correct)
 
+    def test_latex_fraction_pi_numeric(self):
+        s = score_answer(r"FINAL_ANSWER: \frac{\pi}{6}", str(math.pi / 6), "float")
+        self.assertTrue(s.correct)
+
+    def test_nested_boxed_extraction(self):
+        text = r"work $$\boxed{u(x,t)=\frac{1}{1+e^{x-t}}}$$"
+        self.assertEqual(extract_final_answer(text), r"u(x,t)=\frac{1}{1+e^{x-t}}")
+
     def test_unordered_values(self):
         s = score_answer("FINAL_ANSWER: 1, 3", "3,1", "set")
         self.assertTrue(s.correct)
@@ -20,10 +29,26 @@ class EvaluatorTest(unittest.TestCase):
         if s.correct is not None:  # sympy may be absent in a bare environment
             self.assertTrue(s.correct)
 
+    def test_symbolic_latex_containment(self):
+        s = score_answer(
+            r"FINAL_ANSWER: The submanifolds are precisely $\mathbb{R}P^k$.",
+            r"\mathbb{R}P^k",
+            "symbolic",
+        )
+        self.assertTrue(s.correct)
+
     def test_boolean_prose(self):
         s = score_answer(
             "work\nFINAL_ANSWER: No, we cannot reject H_0.",
             False,
+            "boolean",
+        )
+        self.assertTrue(s.correct)
+
+    def test_boolean_sentence_true(self):
+        s = score_answer(
+            "FINAL_ANSWER: The stated equation is true for the manifold.",
+            True,
             "boolean",
         )
         self.assertTrue(s.correct)
