@@ -48,13 +48,13 @@ def canonical_answer_type(raw_type: Any, answer: Any) -> str:
 
 _DOMAIN_RULES = [
     ("complex_analysis", ("complex analysis", "complex variable", "holomorphic")),
-    ("functional_analysis", ("functional analysis", "banach space", "hilbert space", "operator theory")),
-    ("measure_theory", ("measure theory", "lebesgue", "measure and integration")),
+    ("functional_analysis", ("functional analysis", "banach space", "banach spaces", "hilbert space", "hilbert spaces", "operator theory")),
+    ("measure_theory", ("measure theory", "measure and integration", "measure & integration", "lebesgue", "integration theory")),
     ("pde", ("partial differential equation", "partial differential equations", "pde")),
     ("ode", ("ordinary differential equation", "ordinary differential equations", "dynamical systems")),
     ("stochastic_processes", ("stochastic process", "markov process", "brownian motion")),
-    ("statistical_inference", ("statistical inference", "mathematical statistics", "hypothesis testing", "estimation theory")),
-    ("regression_analysis", ("regression analysis", "linear regression", "generalized linear model")),
+    ("regression_analysis", ("regression analysis", "linear regression", "multiple regression", "logistic regression", "generalized linear model", "generalized linear models")),
+    ("statistical_inference", ("statistical inference", "mathematical statistics", "hypothesis testing", "estimation theory", "parameter estimation")),
     ("probability_theory", ("probability and statistics", "probability theory", "probability", "random variable")),
     ("numerical_analysis", ("numerical analysis", "numerical mathematics", "computational mathematics", "scientific computing", "numerical methods")),
     ("operations_research", ("operations research", "operational research", "linear programming", "integer programming", "convex optimization", "optimization theory")),
@@ -181,13 +181,21 @@ def _format_options(options: Any) -> tuple[str, Dict[str, Any]]:
 
 
 def normalize_supergpqa(item: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    # SuperGPQA's hierarchy is discipline=Science, field=Mathematics, then a
-    # graduate-level mathematics subfield (e.g. Mathematical Analysis or ODE).
+    # SuperGPQA uses discipline=Science and then a graduate field/subfield.
+    # Mathematics gives the core math coverage. Statistics is also admitted,
+    # but only when its subfield maps cleanly to one of our statistical domains.
     if str(item.get("discipline") or "").strip().lower() != "science":
         return None
-    if str(item.get("field") or "").strip().lower() != "mathematics":
+    field = str(item.get("field") or "").strip().lower()
+    subfield = item.get("subfield")
+    if field == "mathematics":
+        domain = infer_domain(subfield)
+    elif field in {"statistics", "statistical science", "statistics and data science"}:
+        domain = infer_domain(subfield, item.get("question"))
+        if domain not in {"regression_analysis", "statistical_inference", "probability_theory"}:
+            return None
+    else:
         return None
-    domain = infer_domain(item.get("subfield"))
     if domain is None:
         return None
     option_text, option_map = _format_options(item.get("options"))
