@@ -35,8 +35,9 @@ jobs:
         run: |
           python scripts/audit_dataset.py \
             tmp/public_candidates_full/all_public_candidates.jsonl \
-            --report tmp/public_candidates_full/audit.json
+            --output tmp/public_candidates_full/audit.json
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: public-candidates-full
           retention-days: 30
