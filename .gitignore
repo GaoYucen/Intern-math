@@ -6,3 +6,4 @@ outputs/
 reports/
 *.log
 .DS_Store
+tmp/

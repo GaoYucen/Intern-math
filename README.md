@@ -49,7 +49,7 @@ responses.
 
 ## Benchmark workflow
 
-See `docs/EXPERIMENT_PLAN.md` and `data/README.md`.
+See `docs/EXPERIMENT_PLAN.md`, `data/README.md`, and `docs/STUDENT_DATA_AUDIT.md`.
 
 The intended order is:
 
