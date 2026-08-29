@@ -35,27 +35,27 @@
     "topology": 20
   },
   "by_source": {
-    "deepmath_gap": 31,
-    "hardmath2": 9,
-    "ma_proofbench": 34,
+    "deepmath_gap": 30,
+    "hardmath2": 10,
+    "ma_proofbench": 26,
     "mmlu_regression": 20,
     "orqa": 20,
-    "proofnet_verified": 15,
-    "scibench": 6,
-    "supergpqa": 153,
-    "theoremqa": 52
+    "proofnet_verified": 19,
+    "scibench": 23,
+    "supergpqa": 21,
+    "theoremqa": 171
   },
   "by_answer_type": {
-    "boolean": 14,
-    "choice": 193,
-    "float": 19,
-    "integer": 22,
-    "multiple_values": 9,
-    "numeric": 6,
-    "proof": 49,
-    "symbolic": 22,
-    "text": 6
+    "boolean": 30,
+    "choice": 61,
+    "float": 78,
+    "integer": 56,
+    "multiple_values": 18,
+    "numeric": 23,
+    "proof": 45,
+    "symbolic": 21,
+    "text": 8
   },
-  "input_sha256": "5fb5f4e6d1f47336fa5840ccc201b152368c6196cbe9ac6fc50300e3dc654ec5",
-  "gold_sha256": "560272cbe0cf3e7dc65e39334dca61b2cf9245ba174c5a3a181620315f8bb0aa"
+  "input_sha256": "c597ee4d26b1959acd9dac385fc5b3ef3185e18aba6a340730324ee4e57ac52b",
+  "gold_sha256": "c6b9c500e1af9a03c145e682f5acf8e07b8555130a306edc15d46bac095f2991"
 }
