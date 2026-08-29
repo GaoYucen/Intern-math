@@ -53,17 +53,17 @@ _DOMAIN_RULES = [
     ("pde", ("partial differential equation", "partial differential equations", "pde")),
     ("ode", ("ordinary differential equation", "ordinary differential equations", "dynamical systems")),
     ("stochastic_processes", ("stochastic process", "markov process", "brownian motion")),
-    ("probability_theory", ("probability theory", "probability", "random variable")),
     ("statistical_inference", ("statistical inference", "mathematical statistics", "hypothesis testing", "estimation theory")),
     ("regression_analysis", ("regression analysis", "linear regression", "generalized linear model")),
-    ("numerical_analysis", ("numerical analysis", "numerical mathematics", "scientific computing", "numerical methods")),
+    ("probability_theory", ("probability and statistics", "probability theory", "probability", "random variable")),
+    ("numerical_analysis", ("numerical analysis", "numerical mathematics", "computational mathematics", "scientific computing", "numerical methods")),
     ("operations_research", ("operations research", "operational research", "linear programming", "integer programming", "convex optimization", "optimization theory")),
-    ("discrete_mathematics", ("discrete mathematics", "combinatorics", "graph theory")),
+    ("discrete_mathematics", ("discrete mathematics", "combinatorial mathematics", "combinatorics", "graph theory")),
     ("topology", ("algebraic topology", "general topology", "point-set topology", "topology")),
     ("differential_geometry", ("differential geometry", "riemannian geometry", "smooth manifold")),
     ("abstract_algebra", ("abstract algebra", "group theory", "ring theory", "field theory", "commutative algebra", "galois theory")),
-    ("advanced_algebra", ("linear algebra", "matrix theory", "multilinear algebra")),
-    ("mathematical_analysis", ("mathematical analysis", "real analysis", "calculus", "harmonic analysis", "fourier analysis")),
+    ("advanced_algebra", ("advanced algebra", "linear algebra", "matrix theory", "multilinear algebra")),
+    ("mathematical_analysis", ("mathematical analysis", "functions of real variables", "real analysis", "calculus", "harmonic analysis", "fourier analysis")),
 ]
 
 
@@ -118,9 +118,6 @@ THEOREMQA_SUBFIELD_MAP = {
 def normalize_theoremqa(item: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
     if str(item.get("field", "")).strip().lower() != "math":
         return None
-    # The competition proxy is text-only.  A non-null Picture means the item is
-    # not self-contained in the JSON problem string, so exclude it rather than
-    # accidentally measuring missing-image handling.
     if item.get("Picture") not in (None, "", "NONE"):
         return None
     subfield = str(item.get("subfield", "")).strip().lower()
@@ -175,29 +172,34 @@ def normalize_proofnet(item: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
 
 def _format_options(options: Any) -> tuple[str, Dict[str, Any]]:
     if isinstance(options, Mapping):
-        pairs = [(str(k), v) for k, v in options.items()]
+        pairs = [(str(k), v) for k, v in options.items() if v is not None]
     elif isinstance(options, (list, tuple)):
-        pairs = [(chr(ord("A") + i), v) for i, v in enumerate(options)]
+        pairs = [(chr(ord("A") + i), v) for i, v in enumerate(options) if v is not None]
     else:
         return "", {}
     return "\n".join(f"{k}. {v}" for k, v in pairs), {k: v for k, v in pairs}
 
 
 def normalize_supergpqa(item: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    if str(item.get("discipline") or "").strip().lower() not in {"mathematics", "math"}:
+    # SuperGPQA's hierarchy is discipline=Science, field=Mathematics, then a
+    # graduate-level mathematics subfield (e.g. Mathematical Analysis or ODE).
+    if str(item.get("discipline") or "").strip().lower() != "science":
         return None
-    domain = infer_domain(item.get("field"), item.get("subfield"))
+    if str(item.get("field") or "").strip().lower() != "mathematics":
+        return None
+    domain = infer_domain(item.get("subfield"))
     if domain is None:
         return None
     option_text, option_map = _format_options(item.get("options"))
     problem = normalize_problem_text(item.get("question"))
-    if option_text:
-        problem = f"{problem}\n\nOptions:\n{option_text}"
-    answer_letter = str(item.get("answer_letter") or "").strip()
-    if not answer_letter:
+    if not problem or not option_text:
+        return None
+    problem = f"{problem}\n\nOptions:\n{option_text}"
+    answer_letter = str(item.get("answer_letter") or "").strip().upper()
+    if not answer_letter or answer_letter not in option_map:
         return None
     return make_row(
-        problem=problem, answer=answer_letter.upper(), answer_type="choice", domain=domain,
+        problem=problem, answer=answer_letter, answer_type="choice", domain=domain,
         source_dataset="supergpqa", source_id=item.get("uuid", ""), difficulty=item.get("difficulty"),
         source_meta={"discipline": item.get("discipline"), "field": item.get("field"),
                      "subfield": item.get("subfield"), "is_calculation": item.get("is_calculation"),
