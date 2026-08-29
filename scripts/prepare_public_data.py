@@ -27,6 +27,7 @@ from benchmark.gap_adapters import (
     normalize_deepmath_gap,
     normalize_hardmath2,
     normalize_ma_proofbench,
+    normalize_mmlu_regression,
     normalize_orqa,
 )
 from benchmark.io import write_jsonl
@@ -42,12 +43,13 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Prepare public math proxy datasets.")
     p.add_argument(
         "--sources",
-        default="theoremqa,proofnet,scibench,supergpqa,orqa,ma_proofbench,hardmath2,deepmath_gap",
+        default="theoremqa,proofnet,scibench,supergpqa,orqa,ma_proofbench,hardmath2,mmlu_regression,deepmath_gap",
         help="comma-separated source ids",
     )
     p.add_argument("--output-dir", default="data/public_candidates")
     p.add_argument("--supergpqa-dataset", default="m-a-p/SuperGPQA")
     p.add_argument("--hardmath2-dataset", default="JVRoggeveen/HARDMath2")
+    p.add_argument("--mmlu-dataset", default="cais/mmlu")
     p.add_argument("--deepmath-dataset", default="pe-nlp/DeepMath-Magistral-stage1")
     p.add_argument("--limit-per-source", type=int, default=0)
     p.add_argument("--smoke", action="store_true", help="cap each source at 50 normalized rows")
@@ -84,12 +86,16 @@ def _cap(rows: Iterable[dict | None], limit: int) -> list[dict]:
     return out
 
 
-def _stream_hf(dataset_id: str):
+def _datasets_load_dataset():
     try:
         from datasets import load_dataset
     except ImportError as exc:
         raise SystemExit("Install data dependencies: pip install -r requirements-data.txt") from exc
+    return load_dataset
 
+
+def _stream_hf(dataset_id: str):
+    load_dataset = _datasets_load_dataset()
     dataset = None
     last_error: Exception | None = None
     for split in ("train", "test", "validation"):
@@ -147,6 +153,26 @@ def load_hardmath2(dataset_id: str, limit: int) -> list[dict]:
     return _cap((normalize_hardmath2(x) for x in _stream_hf(dataset_id)), limit)
 
 
+def load_mmlu_regression(dataset_id: str, limit: int) -> list[dict]:
+    load_dataset = _datasets_load_dataset()
+    rows: list[dict] = []
+    # Econometrics supplies the advanced regression concepts; high-school
+    # statistics adds classical least-squares/residual interpretation items.
+    for subject in ("econometrics", "high_school_statistics"):
+        for split in ("test", "validation", "dev"):
+            try:
+                dataset = load_dataset(dataset_id, subject, split=split, streaming=True)
+            except Exception:  # noqa: BLE001
+                continue
+            for idx, item in enumerate(dataset):
+                row = normalize_mmlu_regression(item, f"{subject}:{split}:{idx}", subject)
+                if row is not None:
+                    rows.append(row)
+                    if limit and len(rows) >= limit:
+                        return rows
+    return rows
+
+
 def load_deepmath_gap(dataset_id: str, limit: int) -> list[dict]:
     return _cap(
         (normalize_deepmath_gap(item, f"train:{idx}") for idx, item in enumerate(_stream_hf(dataset_id))),
@@ -168,7 +194,7 @@ def main() -> None:
     requested = {x.strip().lower() for x in args.sources.split(",") if x.strip()}
     valid = {
         "theoremqa", "proofnet", "scibench", "supergpqa", "orqa",
-        "ma_proofbench", "hardmath2", "deepmath_gap",
+        "ma_proofbench", "hardmath2", "mmlu_regression", "deepmath_gap",
     }
     unknown = requested - valid
     if unknown:
@@ -193,6 +219,8 @@ def main() -> None:
         loaded["ma_proofbench"] = load_ma_proofbench(args.timeout, limit)
     if "hardmath2" in requested:
         loaded["hardmath2"] = load_hardmath2(args.hardmath2_dataset, limit)
+    if "mmlu_regression" in requested:
+        loaded["mmlu_regression"] = load_mmlu_regression(args.mmlu_dataset, limit)
     if "deepmath_gap" in requested:
         loaded["deepmath_gap"] = load_deepmath_gap(args.deepmath_dataset, limit)
 
