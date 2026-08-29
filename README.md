@@ -2,98 +2,89 @@
 
 A baseline-first codebase for the Intern mathematical reasoning challenge.
 
-The main design choice is deliberate: **build a trustworthy competition-shaped
-proxy dataset and measure a strong single-model baseline before adding
-multi-agent complexity**. The default `ReasoningAgent` makes one model call with
-thinking enabled; an optional two-call self-refinement mode exists only for
-controlled ablation.
+The main design choice is deliberate: **freeze a trustworthy competition-shaped proxy benchmark, establish a reproducible single-model baseline, and only then add routing / verification / multi-agent mechanisms that demonstrably improve the fixed benchmark.**
 
-## Current priority: dataset first
+## Current status
 
-The current work is focused on constructing `Benchmark-v1` before further agent
-optimization. Public adapters are provided for **TheoremQA, ProofNet-Verified,
-SciBench, and the Mathematics subset of SuperGPQA**.
+`Benchmark-v1` is now frozen on `main`.
+
+- 340 problems total;
+- 17 working domains, exactly 20 problems per domain;
+- competition-shaped model input contains only `idx` and `problem`;
+- gold answers and source metadata are kept separately for local evaluation;
+- the frozen input / gold hashes are recorded in `data/benchmark_v1/manifest.json`;
+- automatic source/schema/semantic review and coverage audit reports are stored alongside the benchmark.
+
+The active project stage is now **model evaluation**, not dataset construction.
+
+```text
+data/benchmark_v1/
+  input.jsonl                 # feed this to main.py
+  gold.jsonl                  # local evaluator only; never feed to the agent
+  manifest.json               # frozen counts + SHA256 hashes
+  auto_review_report.json     # automated review summary
+  approved_pool_audit.json    # audited candidate coverage
+  source_coverage.json        # source-pool coverage before balancing
+```
+
+## Agent baseline
+
+The default `ReasoningAgent` is intentionally simple and reproducible:
+
+- `AGENT_MODE=direct`: one reasoning call;
+- `AGENT_MODE=self_refine`: direct solution followed by one independent audit/correction call;
+- thinking mode is enabled by default;
+- every successful response must contain a non-empty `final_response` and the prompt asks the model to end with `FINAL_ANSWER: ...`.
+
+The current default model in `llm_client.py` is `intern-s2-preview`; it can be overridden with `INTERN_MODEL`.
+
+## Local baseline run
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-pip install -r requirements-data.txt
 
-python scripts/prepare_public_data.py --output-dir data/public_candidates
-python scripts/make_review_queue.py \
-  data/public_candidates/all_public_candidates.jsonl \
-  --per-domain 30 \
-  --output data/review_queue_v1.jsonl \
-  --csv-output data/review_queue_v1.csv
-```
-
-See `docs/DATASET_PIPELINE.md` for the complete review, balancing, and export
-workflow.
-
-## Competition-compatible benchmark bundle
-
-After human review and balancing, export with:
-
-```bash
-python scripts/export_competition_bundle.py \
-  data/benchmark_v1_full.jsonl \
-  --output-dir data/benchmark_v1
-```
-
-This produces:
-
-```text
-input.jsonl   # exactly {idx, problem}; feed this to main.py
-gold.jsonl    # local evaluation only; never exposed to the agent
-manifest.json # counts and SHA256 hashes
-```
-
-## Run a baseline
-
-```bash
 export INTERN_API_KEY=YOUR_TOKEN
 export INTERN_MODEL=intern-s2-preview
 export INTERN_THINKING_MODE=1
 export AGENT_MODE=direct
-python main.py --input_file data/benchmark_v1/input.jsonl --output_dir outputs/direct
+export LOCAL_MAX_CONCURRENCY=3
+
+python main.py \
+  --input_file data/benchmark_v1/input.jsonl \
+  --output_dir outputs/direct
+
 python scripts/evaluate_outputs.py \
   --benchmark data/benchmark_v1/gold.jsonl \
   --output_dir outputs/direct \
   --report_dir reports/direct
 ```
 
-### A/B test self-refinement
+The evaluator reports automatically scorable accuracy plus per-domain counts. Proof items remain separated from exact-answer accuracy because they require a proof judge rather than string matching.
 
-```bash
-export AGENT_MODE=self_refine
-python main.py --input_file data/benchmark_v1/input.jsonl --output_dir outputs/self_refine
+## GitHub Actions model runs
+
+Two workflows are prepared:
+
+- `baseline-smoke`: one representative problem from each of the 17 domains, used to validate API connectivity and the end-to-end runner before spending the full evaluation budget;
+- `baseline-full`: the complete 340-problem Benchmark-v1 run, with selectable model, agent mode and local concurrency. Outputs and evaluation reports are uploaded as workflow artifacts.
+
+For Actions-based runs, configure the repository secret:
+
+```text
+INTERN_API_KEY
 ```
 
-## Why this repository starts simple
+Do not commit API keys to the repository.
 
-The previous prototype mixed planner, solver, synthesizer and verifier modules
-before a trustworthy benchmark and direct-model baseline were established.
-That makes a poor leaderboard result hard to diagnose and can even turn a
-correct solver output into a wrong final answer. Here every additional module
-must beat the fixed held-out benchmark before it becomes part of the default.
+## Experimental order from here
 
-## Competition compatibility
+1. run the 17-domain direct smoke test;
+2. if the API/run contract is healthy, run the 340-problem direct baseline;
+3. inspect overall, per-domain and per-answer-type failures;
+4. run the controlled `self_refine` ablation;
+5. add one targeted mechanism at a time (for example routing, specialist prompts, candidate generation, verifier/selector);
+6. retain only mechanisms that improve the same frozen Benchmark-v1, then verify the final candidate on the official evaluation platform.
 
-The runner follows the official interface: `ReasoningAgent.solve(problem,
-metadata)` returns a dictionary containing a non-empty `final_response`. Traces
-contain only aggregate metadata and do not copy the hidden problem or raw model
-responses.
-
-## Intended experimental order
-
-1. import and normalize suitable public mathematical datasets;
-2. manually audit and freeze a balanced held-out proxy benchmark;
-3. run direct Intern model baselines;
-4. perform per-domain and failure-type analysis;
-5. add one targeted mechanism at a time;
-6. keep only changes that improve the held-out benchmark, then verify on the
-   official leaderboard.
-
-Additional notes: `docs/EXPERIMENT_PLAN.md`, `docs/STUDENT_DATA_AUDIT.md`, and
-`data/README.md`.
+Dataset construction details are in `docs/DATASET_PIPELINE.md`.
