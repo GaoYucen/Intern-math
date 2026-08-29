@@ -15,10 +15,15 @@ import csv
 import json
 import os
 import re
+import sys
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from benchmark import read_jsonl, score_answer
 from llm_client import InternChatClient
@@ -86,7 +91,6 @@ def compact_candidate(text: str, max_chars: int) -> str:
     text = str(text or "")
     if len(text) <= max_chars:
         return text
-    # Preserve both the beginning (setup) and the end (conclusion/final answer).
     half = max_chars // 2
     return text[:half] + "\n...[middle truncated by grader]...\n" + text[-half:]
 
@@ -195,7 +199,6 @@ def main() -> None:
         }
         records.append(record)
 
-        # Exact multiple-choice label comparison is already decisive.
         exact_choice_wrong = strict_state == "wrong" and row.get("answer_type") in {
             "choice", "multiple_choice"
         }
@@ -213,7 +216,7 @@ def main() -> None:
             record = futures[future]
             try:
                 judged = future.result()
-            except Exception as exc:  # defensive; keep experiment moving
+            except Exception as exc:
                 judged = {
                     "verdict": "uncertain",
                     "reason": f"judge worker failed: {exc}",
