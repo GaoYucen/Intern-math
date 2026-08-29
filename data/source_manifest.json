@@ -5,7 +5,7 @@
       "id": "theoremqa",
       "upstream": "https://github.com/TIGER-AI-Lab/TheoremQA",
       "license": "MIT",
-      "selection": "field=Math; supported subfields only",
+      "selection": "field=Math; supported subfields only; Picture must be null",
       "role": "university-level theorem-driven QA"
     },
     {
@@ -26,8 +26,22 @@
       "id": "supergpqa",
       "upstream": "https://huggingface.co/datasets/m-a-p/SuperGPQA",
       "license": "ODC-BY",
-      "selection": "discipline=Mathematics and mappable field/subfield",
+      "selection": "discipline=Science; field=Mathematics; mappable subfield",
       "role": "graduate-level multiple-choice coverage"
+    },
+    {
+      "id": "orqa",
+      "upstream": "https://github.com/nl4opt/ORQA",
+      "license": "not-declared-in-repository",
+      "selection": "validation + test; text-only context/question/options",
+      "role": "expert-authored operations-research reasoning coverage"
+    },
+    {
+      "id": "deepmath_gap",
+      "upstream": "https://huggingface.co/datasets/pe-nlp/DeepMath-Magistral-stage1",
+      "license": "derived-dataset-license-not-stated; original DeepMath-103K is MIT",
+      "selection": "only under-covered topic paths: PDE, differential geometry, measure theory, functional analysis, regression",
+      "role": "gap-filling candidate pool only; mandatory human review before Benchmark-v1"
     }
   ]
 }
