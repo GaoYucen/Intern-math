@@ -118,6 +118,11 @@ THEOREMQA_SUBFIELD_MAP = {
 def normalize_theoremqa(item: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
     if str(item.get("field", "")).strip().lower() != "math":
         return None
+    # The competition proxy is text-only.  A non-null Picture means the item is
+    # not self-contained in the JSON problem string, so exclude it rather than
+    # accidentally measuring missing-image handling.
+    if item.get("Picture") not in (None, "", "NONE"):
+        return None
     subfield = str(item.get("subfield", "")).strip().lower()
     domain = THEOREMQA_SUBFIELD_MAP.get(subfield) or infer_domain(item.get("subfield"), item.get("theorem"))
     return make_row(
