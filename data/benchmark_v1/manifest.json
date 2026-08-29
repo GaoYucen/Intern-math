@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "n_rows": 340,
+  "input_contract": {
+    "required_keys": [
+      "idx",
+      "problem"
+    ]
+  },
+  "output_contract": {
+    "required_keys": [
+      "idx",
+      "status",
+      "final_response"
+    ],
+    "note": "main.py writes one JSON result per problem; final_response must be non-empty on success"
+  },
+  "by_domain": {
+    "abstract_algebra": 20,
+    "advanced_algebra": 20,
+    "complex_analysis": 20,
+    "differential_geometry": 20,
+    "discrete_mathematics": 20,
+    "functional_analysis": 20,
+    "mathematical_analysis": 20,
+    "measure_theory": 20,
+    "numerical_analysis": 20,
+    "ode": 20,
+    "operations_research": 20,
+    "pde": 20,
+    "probability_theory": 20,
+    "regression_analysis": 20,
+    "statistical_inference": 20,
+    "stochastic_processes": 20,
+    "topology": 20
+  },
+  "by_source": {
+    "deepmath_gap": 31,
+    "hardmath2": 9,
+    "ma_proofbench": 34,
+    "mmlu_regression": 20,
+    "orqa": 20,
+    "proofnet_verified": 15,
+    "scibench": 6,
+    "supergpqa": 153,
+    "theoremqa": 52
+  },
+  "by_answer_type": {
+    "boolean": 14,
+    "choice": 193,
+    "float": 19,
+    "integer": 22,
+    "multiple_values": 9,
+    "numeric": 6,
+    "proof": 49,
+    "symbolic": 22,
+    "text": 6
+  },
+  "input_sha256": "5fb5f4e6d1f47336fa5840ccc201b152368c6196cbe9ac6fc50300e3dc654ec5",
+  "gold_sha256": "560272cbe0cf3e7dc65e39334dca61b2cf9245ba174c5a3a181620315f8bb0aa"
+}

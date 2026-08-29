@@ -1,0 +1,108 @@
+{
+  "review_method": "automatic_source_schema_semantic_v1",
+  "n_input": 4656,
+  "n_approved": 4374,
+  "n_rejected": 282,
+  "approval_rate": 0.939433,
+  "reasons": {
+    "curated_source_schema_pass": 4035,
+    "deepmath_problem_not_semantically_confirmed": 279,
+    "deepmath_topic_and_problem_agree": 102,
+    "expert_reviewed_formal_benchmark": 103,
+    "external_visual_dependency": 2,
+    "mmlu_regression_explicit_topic_match": 67,
+    "mmlu_regression_keyword_missing": 1,
+    "peer_verified_course_benchmark": 67
+  },
+  "by_domain": {
+    "abstract_algebra": {
+      "approved": 89
+    },
+    "advanced_algebra": {
+      "approved": 280
+    },
+    "complex_analysis": {
+      "approved": 149
+    },
+    "differential_geometry": {
+      "rejected": 240,
+      "approved": 27
+    },
+    "discrete_mathematics": {
+      "approved": 387
+    },
+    "functional_analysis": {
+      "approved": 83
+    },
+    "mathematical_analysis": {
+      "approved": 599,
+      "rejected": 1
+    },
+    "measure_theory": {
+      "approved": 34
+    },
+    "numerical_analysis": {
+      "approved": 141
+    },
+    "ode": {
+      "approved": 210
+    },
+    "operations_research": {
+      "approved": 1513
+    },
+    "pde": {
+      "approved": 142,
+      "rejected": 39
+    },
+    "probability_theory": {
+      "approved": 243
+    },
+    "regression_analysis": {
+      "approved": 67,
+      "rejected": 1
+    },
+    "statistical_inference": {
+      "approved": 24
+    },
+    "stochastic_processes": {
+      "approved": 62
+    },
+    "topology": {
+      "approved": 324,
+      "rejected": 1
+    }
+  },
+  "by_source": {
+    "deepmath_gap": {
+      "rejected": 279,
+      "approved": 102
+    },
+    "hardmath2": {
+      "approved": 67
+    },
+    "ma_proofbench": {
+      "approved": 103
+    },
+    "mmlu_regression": {
+      "approved": 67,
+      "rejected": 1
+    },
+    "orqa": {
+      "approved": 1513
+    },
+    "proofnet_verified": {
+      "approved": 176
+    },
+    "scibench": {
+      "approved": 91,
+      "rejected": 1
+    },
+    "supergpqa": {
+      "approved": 1875,
+      "rejected": 1
+    },
+    "theoremqa": {
+      "approved": 380
+    }
+  }
+}

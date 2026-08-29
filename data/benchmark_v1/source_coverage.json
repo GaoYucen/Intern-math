@@ -1,0 +1,181 @@
+{
+  "sources": {
+    "theoremqa": {
+      "n_rows": 380,
+      "by_domain": {
+        "abstract_algebra": 11,
+        "advanced_algebra": 52,
+        "complex_analysis": 21,
+        "discrete_mathematics": 56,
+        "functional_analysis": 10,
+        "mathematical_analysis": 147,
+        "measure_theory": 4,
+        "numerical_analysis": 24,
+        "probability_theory": 19,
+        "statistical_inference": 24,
+        "stochastic_processes": 12
+      },
+      "by_answer_type": {
+        "boolean": 62,
+        "float": 171,
+        "integer": 100,
+        "multiple_values": 36,
+        "text": 11
+      },
+      "by_review_status": {
+        "pending": 380
+      }
+    },
+    "proofnet_verified": {
+      "n_rows": 176,
+      "by_domain": {
+        "abstract_algebra": 28,
+        "advanced_algebra": 26,
+        "complex_analysis": 6,
+        "mathematical_analysis": 56,
+        "topology": 60
+      },
+      "by_answer_type": {
+        "proof": 176
+      },
+      "by_review_status": {
+        "pending": 176
+      }
+    },
+    "scibench": {
+      "n_rows": 92,
+      "by_domain": {
+        "mathematical_analysis": 42,
+        "ode": 50
+      },
+      "by_answer_type": {
+        "numeric": 92
+      },
+      "by_review_status": {
+        "pending": 92
+      }
+    },
+    "supergpqa": {
+      "n_rows": 1876,
+      "by_domain": {
+        "abstract_algebra": 50,
+        "advanced_algebra": 202,
+        "complex_analysis": 122,
+        "discrete_mathematics": 331,
+        "mathematical_analysis": 355,
+        "numerical_analysis": 117,
+        "ode": 160,
+        "probability_theory": 224,
+        "stochastic_processes": 50,
+        "topology": 265
+      },
+      "by_answer_type": {
+        "choice": 1876
+      },
+      "by_review_status": {
+        "pending": 1876
+      }
+    },
+    "orqa": {
+      "n_rows": 1513,
+      "by_domain": {
+        "operations_research": 1513
+      },
+      "by_answer_type": {
+        "choice": 1513
+      },
+      "by_review_status": {
+        "pending": 1513
+      }
+    },
+    "ma_proofbench": {
+      "n_rows": 103,
+      "by_domain": {
+        "functional_analysis": 73,
+        "measure_theory": 30
+      },
+      "by_answer_type": {
+        "proof": 103
+      },
+      "by_review_status": {
+        "pending": 103
+      }
+    },
+    "hardmath2": {
+      "n_rows": 67,
+      "by_domain": {
+        "pde": 67
+      },
+      "by_answer_type": {
+        "symbolic": 67
+      },
+      "by_review_status": {
+        "pending": 67
+      }
+    },
+    "mmlu_regression": {
+      "n_rows": 68,
+      "by_domain": {
+        "regression_analysis": 68
+      },
+      "by_answer_type": {
+        "choice": 68
+      },
+      "by_review_status": {
+        "pending": 68
+      }
+    },
+    "deepmath_gap": {
+      "n_rows": 381,
+      "by_domain": {
+        "differential_geometry": 267,
+        "pde": 114
+      },
+      "by_answer_type": {
+        "boolean": 25,
+        "integer": 147,
+        "numeric": 1,
+        "symbolic": 208
+      },
+      "by_review_status": {
+        "pending": 381
+      }
+    }
+  },
+  "merged": {
+    "n_rows": 4656,
+    "by_domain": {
+      "abstract_algebra": 89,
+      "advanced_algebra": 280,
+      "complex_analysis": 149,
+      "differential_geometry": 267,
+      "discrete_mathematics": 387,
+      "functional_analysis": 83,
+      "mathematical_analysis": 600,
+      "measure_theory": 34,
+      "numerical_analysis": 141,
+      "ode": 210,
+      "operations_research": 1513,
+      "pde": 181,
+      "probability_theory": 243,
+      "regression_analysis": 68,
+      "statistical_inference": 24,
+      "stochastic_processes": 62,
+      "topology": 325
+    },
+    "by_answer_type": {
+      "boolean": 87,
+      "choice": 3457,
+      "float": 171,
+      "integer": 247,
+      "multiple_values": 36,
+      "numeric": 93,
+      "proof": 279,
+      "symbolic": 275,
+      "text": 11
+    },
+    "by_review_status": {
+      "pending": 4656
+    }
+  }
+}

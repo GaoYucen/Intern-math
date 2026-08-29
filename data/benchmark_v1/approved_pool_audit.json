@@ -1,0 +1,222 @@
+{
+  "n_records": 4374,
+  "min_per_domain": 20,
+  "by_domain": {
+    "abstract_algebra": 89,
+    "advanced_algebra": 280,
+    "complex_analysis": 149,
+    "differential_geometry": 27,
+    "discrete_mathematics": 387,
+    "functional_analysis": 83,
+    "mathematical_analysis": 599,
+    "measure_theory": 34,
+    "numerical_analysis": 141,
+    "ode": 210,
+    "operations_research": 1513,
+    "pde": 142,
+    "probability_theory": 243,
+    "regression_analysis": 67,
+    "statistical_inference": 24,
+    "stochastic_processes": 62,
+    "topology": 324
+  },
+  "by_source": {
+    "deepmath_gap": 102,
+    "hardmath2": 67,
+    "ma_proofbench": 103,
+    "mmlu_regression": 67,
+    "orqa": 1513,
+    "proofnet_verified": 176,
+    "scibench": 91,
+    "supergpqa": 1875,
+    "theoremqa": 380
+  },
+  "by_answer_type": {
+    "boolean": 66,
+    "choice": 3455,
+    "float": 171,
+    "integer": 142,
+    "multiple_values": 36,
+    "numeric": 91,
+    "proof": 279,
+    "symbolic": 123,
+    "text": 11
+  },
+  "by_review_status": {
+    "approved": 4374
+  },
+  "domain_source": {
+    "abstract_algebra": {
+      "theoremqa": 11,
+      "proofnet_verified": 28,
+      "supergpqa": 50
+    },
+    "advanced_algebra": {
+      "theoremqa": 52,
+      "proofnet_verified": 26,
+      "supergpqa": 202
+    },
+    "complex_analysis": {
+      "theoremqa": 21,
+      "proofnet_verified": 6,
+      "supergpqa": 122
+    },
+    "differential_geometry": {
+      "deepmath_gap": 27
+    },
+    "discrete_mathematics": {
+      "theoremqa": 56,
+      "supergpqa": 331
+    },
+    "functional_analysis": {
+      "theoremqa": 10,
+      "ma_proofbench": 73
+    },
+    "mathematical_analysis": {
+      "theoremqa": 147,
+      "proofnet_verified": 56,
+      "scibench": 41,
+      "supergpqa": 355
+    },
+    "measure_theory": {
+      "theoremqa": 4,
+      "ma_proofbench": 30
+    },
+    "numerical_analysis": {
+      "theoremqa": 24,
+      "supergpqa": 117
+    },
+    "ode": {
+      "scibench": 50,
+      "supergpqa": 160
+    },
+    "operations_research": {
+      "orqa": 1513
+    },
+    "pde": {
+      "hardmath2": 67,
+      "deepmath_gap": 75
+    },
+    "probability_theory": {
+      "theoremqa": 19,
+      "supergpqa": 224
+    },
+    "regression_analysis": {
+      "mmlu_regression": 67
+    },
+    "statistical_inference": {
+      "theoremqa": 24
+    },
+    "stochastic_processes": {
+      "theoremqa": 12,
+      "supergpqa": 50
+    },
+    "topology": {
+      "proofnet_verified": 60,
+      "supergpqa": 264
+    }
+  },
+  "domain_difficulty": {
+    "abstract_algebra": {
+      "unknown": 39,
+      "easy": 7,
+      "hard": 31,
+      "middle": 12
+    },
+    "advanced_algebra": {
+      "unknown": 78,
+      "hard": 89,
+      "middle": 91,
+      "easy": 22
+    },
+    "complex_analysis": {
+      "unknown": 27,
+      "hard": 62,
+      "middle": 48,
+      "easy": 12
+    },
+    "differential_geometry": {
+      "13": 3,
+      "18": 4,
+      "15": 2,
+      "17": 10,
+      "16": 7,
+      "14": 1
+    },
+    "discrete_mathematics": {
+      "unknown": 56,
+      "middle": 87,
+      "hard": 231,
+      "easy": 13
+    },
+    "functional_analysis": {
+      "unknown": 10,
+      "level1": 19,
+      "level2": 54
+    },
+    "mathematical_analysis": {
+      "unknown": 244,
+      "hard": 217,
+      "middle": 116,
+      "easy": 22
+    },
+    "measure_theory": {
+      "unknown": 4,
+      "level1": 13,
+      "level2": 17
+    },
+    "numerical_analysis": {
+      "unknown": 24,
+      "middle": 48,
+      "hard": 45,
+      "easy": 24
+    },
+    "ode": {
+      "unknown": 50,
+      "middle": 70,
+      "easy": 14,
+      "hard": 76
+    },
+    "operations_research": {
+      "unknown": 1513
+    },
+    "pde": {
+      "graduate": 67,
+      "12": 11,
+      "16": 19,
+      "17": 4,
+      "14": 21,
+      "13": 7,
+      "11": 5,
+      "15": 7,
+      "10": 1
+    },
+    "probability_theory": {
+      "unknown": 19,
+      "hard": 78,
+      "middle": 118,
+      "easy": 28
+    },
+    "regression_analysis": {
+      "college": 55,
+      "high_school": 12
+    },
+    "statistical_inference": {
+      "unknown": 24
+    },
+    "stochastic_processes": {
+      "unknown": 12,
+      "hard": 15,
+      "middle": 16,
+      "easy": 19
+    },
+    "topology": {
+      "unknown": 60,
+      "middle": 71,
+      "hard": 180,
+      "easy": 13
+    }
+  },
+  "coverage_gaps": {},
+  "benchmark_ready": true
+}
