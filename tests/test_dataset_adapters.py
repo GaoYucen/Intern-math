@@ -60,12 +60,12 @@ def test_supergpqa_math_choice_formats_options():
     row = normalize_supergpqa({
         "uuid": "abc",
         "question": "Which statement is true?",
-        "options": ["first", "second", "third", "fourth"],
+        "options": {"A": "first", "B": "second", "C": "third", "D": "fourth"},
         "answer_letter": "B",
         "answer": "second",
-        "discipline": "Mathematics",
-        "field": "Mathematical Analysis",
-        "subfield": "Real Analysis",
+        "discipline": "Science",
+        "field": "Mathematics",
+        "subfield": "Mathematical Analysis",
         "difficulty": "hard",
         "is_calculation": False,
     })
@@ -75,6 +75,23 @@ def test_supergpqa_math_choice_formats_options():
     assert row["answer_type"] == "choice"
     assert "A. first" in row["problem"]
     assert "B. second" in row["problem"]
+
+
+def test_supergpqa_advanced_algebra_maps():
+    row = normalize_supergpqa({
+        "uuid": "alg",
+        "question": "Compute the determinant.",
+        "options": {"A": "1", "B": "2"},
+        "answer_letter": "A",
+        "answer": "1",
+        "discipline": "Science",
+        "field": "Mathematics",
+        "subfield": "Advanced Algebra",
+        "difficulty": "middle",
+        "is_calculation": True,
+    })
+    assert row is not None
+    assert row["domain"] == "advanced_algebra"
 
 
 def test_non_math_supergpqa_is_dropped():
