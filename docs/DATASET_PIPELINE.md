@@ -1,7 +1,7 @@
 # Public dataset pipeline
 
-The repository now treats the **dataset as the first deliverable**. The goal is
-to create a proxy benchmark that matches the competition I/O contract before
+The repository treats the **dataset as the first deliverable**. The goal is to
+create a proxy benchmark that matches the competition I/O contract before
 optimizing the agent.
 
 ## 1. Competition-shaped contract
@@ -30,7 +30,7 @@ Each public item is normalized to:
   "answer_type": "numeric",
   "domain": "pde",
   "difficulty": "hard",
-  "source_dataset": "supergpqa",
+  "source_dataset": "deepmath_gap",
   "source_id": "...",
   "problem_hash": "...",
   "review_status": "pending",
@@ -42,18 +42,25 @@ Imported rows remain `review_status=pending`: a public gold label does not prove
 that our domain mapping, self-containedness, answer type, or formatting is
 appropriate for this competition.
 
-## 3. Sources integrated first
+## 3. Source policy
 
-1. **TheoremQA**: keep only `field=Math`; useful for complex/functional/numerical
-   analysis, probability, stochastic processes and discrete mathematics.
-2. **ProofNet-Verified**: undergraduate proof problems; retained as
-   `answer_type=proof` and evaluated separately from exact/numeric QA.
-3. **SciBench**: first use `calculus` and `diff`, mapped to mathematical analysis
-   and ordinary differential equations.
-4. **SuperGPQA**: keep only Mathematics rows with a mappable field/subfield;
-   useful for graduate-level and under-covered domains.
+We use two source tiers. **Primary proxy sources** are comparatively clean and
+are allowed to contribute broadly: TheoremQA (text-only Math rows),
+ProofNet-Verified, SciBench `calculus`/`diff`, SuperGPQA's `Science ->
+Mathematics` hierarchy, and ORQA for expert-authored operations-research
+reasoning. **Gap-filling sources** are used only when primary coverage is
+insufficient. `DeepMath-Magistral-stage1` is currently restricted to topic paths
+for PDE, differential geometry, measure theory, functional analysis, and
+regression; every such row requires human review before entering Benchmark-v1.
 
-Source URLs and licenses are in `data/source_manifest.json`.
+ProofNet rows remain `answer_type=proof` and are scored separately from
+objective-answer QA. TheoremQA rows with a non-null `Picture` are excluded so
+the local benchmark remains text-only. ORQA concatenates its context, question,
+and options into one `problem` string and converts its zero-based target index
+to an answer letter.
+
+Source URLs, selection rules, and license notes are in
+`data/source_manifest.json`.
 
 ## 4. Build the public candidate pool
 
@@ -91,7 +98,9 @@ For each selected item verify at least:
 - `answer_type` is correct;
 - domain mapping is correct;
 - no image or inaccessible external context is required;
-- no answer is leaked in the problem statement.
+- no answer is leaked in the problem statement;
+- for aggregated/gap-filling sources, the topic label genuinely matches the
+  mathematics being tested.
 
 Approved rows are changed to `review_status=approved`.
 
