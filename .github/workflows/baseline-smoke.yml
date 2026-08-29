@@ -1,6 +1,5 @@
 name: baseline-smoke
 
-# Re-run marker: API secret configured on 2026-08-29.
 on:
   push:
     branches: [main]
@@ -48,7 +47,7 @@ jobs:
             echo "INTERN_API_KEY repository secret is not configured."
             exit 2
           fi
-      - name: Build 17-domain representative smoke subset
+      - name: Build true 17-domain representative smoke subset
         run: |
           python - <<'PY'
           import json
@@ -57,16 +56,35 @@ jobs:
           input_rows = [json.loads(x) for x in Path('data/benchmark_v1/input.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
           gold_rows = [json.loads(x) for x in Path('data/benchmark_v1/gold.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
           assert len(input_rows) == len(gold_rows) == 340
-          selected = list(range(0, 340, 20))
+          input_by_idx = {row['idx']: row for row in input_rows}
+
+          selected_by_domain = {}
+          review_types = {'proof', 'explanation', 'derivation'}
+          # Prefer an automatically scorable item from every domain so the smoke
+          # run checks both inference and the objective evaluator.
+          for row in gold_rows:
+              domain = row.get('domain', 'unknown')
+              if domain not in selected_by_domain and row.get('answer_type', 'text') not in review_types:
+                  selected_by_domain[domain] = row
+          # If a domain contains only proof-like items, still include one so that
+          # every benchmark domain is represented in the API smoke test.
+          for row in gold_rows:
+              domain = row.get('domain', 'unknown')
+              selected_by_domain.setdefault(domain, row)
+
+          selected_gold = [selected_by_domain[d] for d in sorted(selected_by_domain)]
+          assert len(selected_gold) == 17, (len(selected_gold), sorted(selected_by_domain))
+          assert len({r['domain'] for r in selected_gold}) == 17
+
           Path('tmp').mkdir(exist_ok=True)
-          with Path('tmp/smoke_input.jsonl').open('w', encoding='utf-8') as f:
-              for idx in selected:
-                  f.write(json.dumps(input_rows[idx], ensure_ascii=False) + '\n')
-          with Path('tmp/smoke_gold.jsonl').open('w', encoding='utf-8') as f:
-              for idx in selected:
-                  f.write(json.dumps(gold_rows[idx], ensure_ascii=False) + '\n')
-          print('selected idx:', selected)
-          print('domains:', [gold_rows[i].get('domain') for i in selected])
+          with Path('tmp/smoke_input.jsonl').open('w', encoding='utf-8') as f_in, Path('tmp/smoke_gold.jsonl').open('w', encoding='utf-8') as f_gold:
+              for gold in selected_gold:
+                  f_in.write(json.dumps(input_by_idx[gold['idx']], ensure_ascii=False) + '\n')
+                  f_gold.write(json.dumps(gold, ensure_ascii=False) + '\n')
+
+          print('selected idx:', [r['idx'] for r in selected_gold])
+          print('domains:', [r['domain'] for r in selected_gold])
+          print('answer types:', [r.get('answer_type') for r in selected_gold])
           PY
       - name: Run direct baseline smoke
         run: |
