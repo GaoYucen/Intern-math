@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - "benchmark/adapters.py"
+      - "benchmark/gap_adapters.py"
       - "scripts/prepare_public_data.py"
       - "scripts/make_review_queue.py"
       - "scripts/export_competition_bundle.py"
       - "tests/test_dataset_adapters.py"
+      - "tests/test_gap_adapters.py"
       - "requirements-data.txt"
       - ".github/workflows/data-pipeline-smoke.yml"
   workflow_dispatch:
@@ -38,9 +40,16 @@ jobs:
           import json
           from pathlib import Path
           report = json.loads(Path('tmp/public_smoke/coverage.json').read_text())
-          for source in ('theoremqa', 'proofnet_verified', 'scibench', 'supergpqa'):
+          expected = (
+              'theoremqa', 'proofnet_verified', 'scibench', 'supergpqa',
+              'orqa', 'deepmath_gap'
+          )
+          for source in expected:
               assert report['sources'][source]['n_rows'] > 0, (source, report['sources'][source])
           assert report['merged']['n_rows'] > 0
+          assert report['sources']['orqa']['by_domain'].get('operations_research', 0) > 0
+          gap_domains = report['sources']['deepmath_gap']['by_domain']
+          assert gap_domains.get('pde', 0) + gap_domains.get('differential_geometry', 0) > 0
           PY
       - name: Build exploratory competition bundle
         run: |
