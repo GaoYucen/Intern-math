@@ -5,17 +5,23 @@ on:
     paths:
       - "benchmark/adapters.py"
       - "benchmark/gap_adapters.py"
+      - "benchmark/domains.py"
       - "scripts/prepare_public_data.py"
-      - "scripts/make_review_queue.py"
+      - "scripts/auto_review_dataset.py"
       - "scripts/audit_dataset.py"
+      - "scripts/build_balanced_benchmark.py"
+      - "scripts/export_competition_bundle.py"
       - "requirements-data.txt"
       - ".github/workflows/build-public-candidates.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,24 +36,68 @@ jobs:
         run: |
           python scripts/prepare_public_data.py \
             --output-dir tmp/public_candidates_full
-      - name: Create source-diverse review queue
+      - name: Automatic source and semantic review
         run: |
-          python scripts/make_review_queue.py \
+          python scripts/auto_review_dataset.py \
             tmp/public_candidates_full/all_public_candidates.jsonl \
-            --per-domain 30 \
-            --output tmp/review_queue_v1.jsonl \
-            --csv-output tmp/review_queue_v1.csv
-      - name: Dataset audit
+            --output tmp/reviewed_candidates.jsonl \
+            --approved-output tmp/approved_candidates.jsonl \
+            --report tmp/auto_review_report.json
+      - name: Audit approved pool
         run: |
           python scripts/audit_dataset.py \
-            tmp/public_candidates_full/all_public_candidates.jsonl \
-            --output tmp/public_candidates_full/audit.json
+            tmp/approved_candidates.jsonl \
+            --min-per-domain 20 \
+            --output tmp/approved_audit.json
+      - name: Build balanced Benchmark-v1
+        run: |
+          python scripts/build_balanced_benchmark.py \
+            tmp/approved_candidates.jsonl \
+            --output data/benchmark_v1_full.jsonl \
+            --per-domain 20 \
+            --min-per-domain 20 \
+            --seed 20260829
+          rm -rf data/benchmark_v1
+          python scripts/export_competition_bundle.py \
+            data/benchmark_v1_full.jsonl \
+            --output-dir data/benchmark_v1
+          cp tmp/auto_review_report.json data/benchmark_v1/auto_review_report.json
+          cp tmp/approved_audit.json data/benchmark_v1/approved_pool_audit.json
+          cp tmp/public_candidates_full/coverage.json data/benchmark_v1/source_coverage.json
+      - name: Validate frozen input contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [json.loads(x) for x in Path('data/benchmark_v1/input.jsonl').read_text().splitlines() if x.strip()]
+          assert len(rows) == 340, len(rows)
+          assert all(set(r) == {'idx', 'problem'} for r in rows)
+          assert [r['idx'] for r in rows] == list(range(len(rows)))
+          gold = [json.loads(x) for x in Path('data/benchmark_v1/gold.jsonl').read_text().splitlines() if x.strip()]
+          assert len(gold) == len(rows)
+          assert all(str(r.get('answer', '')).strip() for r in gold)
+          print(f'validated {len(rows)} benchmark rows')
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: public-candidates-full
+          name: benchmark-v1-build
           retention-days: 30
           path: |
-            tmp/public_candidates_full
-            tmp/review_queue_v1.jsonl
-            tmp/review_queue_v1.csv
+            tmp/public_candidates_full/coverage.json
+            tmp/auto_review_report.json
+            tmp/approved_audit.json
+            data/benchmark_v1_full.jsonl
+            data/benchmark_v1
+      - name: Commit frozen benchmark to main
+        if: success() && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/benchmark_v1_full.jsonl data/benchmark_v1
+          if git diff --cached --quiet; then
+            echo "Benchmark files unchanged"
+          else
+            git commit -m "Freeze auto-reviewed Benchmark-v1 dataset"
+            git push origin HEAD:main
+          fi
