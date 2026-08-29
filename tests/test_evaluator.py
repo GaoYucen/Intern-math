@@ -20,6 +20,27 @@ class EvaluatorTest(unittest.TestCase):
         if s.correct is not None:  # sympy may be absent in a bare environment
             self.assertTrue(s.correct)
 
+    def test_boolean_prose(self):
+        s = score_answer(
+            "work\nFINAL_ANSWER: No, we cannot reject H_0.",
+            False,
+            "boolean",
+        )
+        self.assertTrue(s.correct)
+
+    def test_truncated_choice_is_not_scored_from_incidental_letter(self):
+        s = score_answer(
+            "Long unfinished derivation ending with: But a(k) is usually small",
+            "C",
+            "choice",
+        )
+        self.assertIsNone(s.correct)
+        self.assertEqual(s.reason, "missing explicit final choice")
+
+    def test_strict_choice_fallback(self):
+        s = score_answer("B", "B", "choice")
+        self.assertTrue(s.correct)
+
     def test_proof_requires_review(self):
         s = score_answer("FINAL_ANSWER: proved", "proof", "proof")
         self.assertIsNone(s.correct)
