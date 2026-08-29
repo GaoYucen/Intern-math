@@ -99,5 +99,7 @@ jobs:
             echo "Benchmark files unchanged"
           else
             git commit -m "Freeze auto-reviewed Benchmark-v1 dataset"
+            git fetch origin main
+            git rebase origin/main
             git push origin HEAD:main
           fi
