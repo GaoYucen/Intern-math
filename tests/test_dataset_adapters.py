@@ -28,6 +28,21 @@ def test_theoremqa_math_row_normalizes():
     assert len(row["problem_hash"]) == 64
 
 
+def test_theoremqa_picture_dependent_row_is_dropped():
+    assert normalize_theoremqa({
+        "Question": "Use the figure to compute x.",
+        "Answer": 1,
+        "Answer_type": "integer",
+        "Picture": "images/example.png",
+        "source": "example",
+        "id": "x/image",
+        "explanation": "NONE",
+        "theorem": "calculus",
+        "subfield": "Calculus",
+        "field": "Math",
+    }) is None
+
+
 def test_scibench_diff_maps_to_ode():
     row = normalize_scibench({
         "problem_text": "Solve y' = y.",
