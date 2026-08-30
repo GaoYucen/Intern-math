@@ -1,11 +1,6 @@
 name: finalize-b0
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/finalize-b0.yml"
-      - "scripts/adjudicate_results.py"
   workflow_dispatch:
 
 permissions:
@@ -167,5 +162,6 @@ jobs:
             echo "No report changes to commit."
           else
             git commit -m "Record finalized B0 benchmark results"
-            git push
+            git pull --rebase origin main
+            git push origin HEAD:main
           fi
