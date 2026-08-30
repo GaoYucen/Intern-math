@@ -1,6 +1,12 @@
 name: finalize-b0
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/finalize-b0.yml"
+      - "scripts/adjudicate_results.py"
+      - "tests/test_adjudicator_parser.py"
   workflow_dispatch:
 
 permissions:
@@ -133,6 +139,7 @@ jobs:
               'retry_concurrency': 1,
               'judge_primary_model': 'intern-s1-pro',
               'judge_fallback_model': 'intern-s2-preview',
+              'judge_protocol': 'VERDICT-line + JSON/token compatibility + normalization retry',
               'benchmark_rows': manifest.get('n_rows'),
               'benchmark_input_sha256': manifest.get('input_sha256'),
               'benchmark_gold_sha256': manifest.get('gold_sha256'),
