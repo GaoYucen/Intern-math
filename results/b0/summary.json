@@ -1,0 +1,82 @@
+{
+  "benchmark": "Benchmark-v1",
+  "n_items": 340,
+  "participant": {
+    "model": "intern-s2-preview",
+    "mode": "direct",
+    "thinking_mode": false,
+    "max_tokens": 4096
+  },
+  "strict": {
+    "correct": 151,
+    "wrong": 70,
+    "review": 119,
+    "success_rate": 1.0,
+    "explicit_final_rate": 0.9058823529411765,
+    "auto_scored_accuracy": 0.6832579185520362
+  },
+  "adjudication": {
+    "judge_primary_model": "intern-s1-pro",
+    "judge_fallback_model": "intern-s2-preview",
+    "n_sent_to_judge": 175,
+    "judge_parse_methods": {
+      "verdict_line": 174,
+      "repair_verdict_line": 1
+    },
+    "final_counts": {
+      "correct": 241,
+      "wrong": 98,
+      "uncertain": 1,
+      "invalid": 0,
+      "error": 0
+    },
+    "effective_denominator": 339,
+    "effective_accuracy": 0.7109144542772862
+  },
+  "by_domain": {
+    "abstract_algebra": {"correct": 17, "wrong": 3},
+    "advanced_algebra": {"correct": 17, "wrong": 3},
+    "complex_analysis": {"correct": 14, "wrong": 6},
+    "differential_geometry": {"correct": 18, "wrong": 2},
+    "discrete_mathematics": {"correct": 14, "wrong": 6},
+    "functional_analysis": {"correct": 15, "wrong": 5},
+    "mathematical_analysis": {"correct": 14, "wrong": 6},
+    "measure_theory": {"correct": 15, "wrong": 5},
+    "numerical_analysis": {"correct": 12, "wrong": 7, "uncertain": 1},
+    "ode": {"correct": 14, "wrong": 6},
+    "operations_research": {"correct": 13, "wrong": 7},
+    "pde": {"correct": 6, "wrong": 14},
+    "probability_theory": {"correct": 12, "wrong": 8},
+    "regression_analysis": {"correct": 17, "wrong": 3},
+    "statistical_inference": {"correct": 15, "wrong": 5},
+    "stochastic_processes": {"correct": 18, "wrong": 2},
+    "topology": {"correct": 10, "wrong": 10}
+  },
+  "by_answer_type": {
+    "boolean": {"correct": 28, "wrong": 2},
+    "choice": {"correct": 46, "wrong": 15},
+    "float": {"correct": 53, "wrong": 25},
+    "integer": {"correct": 41, "wrong": 14, "uncertain": 1},
+    "multiple_values": {"correct": 13, "wrong": 5},
+    "numeric": {"correct": 17, "wrong": 6},
+    "proof": {"correct": 29, "wrong": 16},
+    "symbolic": {"correct": 7, "wrong": 14},
+    "text": {"correct": 7, "wrong": 1}
+  },
+  "by_source": {
+    "deepmath_gap": {"correct": 24, "wrong": 6},
+    "hardmath2": {"correct": 0, "wrong": 10},
+    "ma_proofbench": {"correct": 18, "wrong": 8},
+    "mmlu_regression": {"correct": 17, "wrong": 3},
+    "orqa": {"correct": 13, "wrong": 7},
+    "proofnet_verified": {"correct": 11, "wrong": 8},
+    "scibench": {"correct": 17, "wrong": 6},
+    "supergpqa": {"correct": 16, "wrong": 5},
+    "theoremqa": {"correct": 125, "wrong": 45, "uncertain": 1}
+  },
+  "benchmark_hashes": {
+    "input_sha256": "c597ee4d26b1959acd9dac385fc5b3ef3185e18aba6a340730324ee4e57ac52b",
+    "gold_sha256": "c6b9c500e1af9a03c145e682f5acf8e07b8555130a306edc15d46bac095f2991"
+  },
+  "note": "This is an internal proxy benchmark result, not an official competition score. Deterministic scoring is applied first; nontrivial wrong/review items except exact multiple-choice mismatches are adjudicated with a reference-based math judge."
+}
