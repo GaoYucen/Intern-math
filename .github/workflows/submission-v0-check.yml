@@ -81,6 +81,14 @@ jobs:
           import re
           from pathlib import Path
 
+          def normalize_answer(text):
+              text = text.strip().replace(" ", "")
+              text = text.replace("\\left", "").replace("\\right", "")
+              for _ in range(3):
+                  text = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", r"\1/\2", text)
+                  text = re.sub(r"\\boxed\{([^{}]+)\}", r"\1", text)
+              return text.strip(".$")
+
           expected = {0: "72", 1: "-1", 2: "-1/8"}
           for idx, gold in expected.items():
               p = Path("outputs/submission_sample") / f"{idx}.json"
@@ -90,7 +98,7 @@ jobs:
               assert response, idx
               matches = re.findall(r"FINAL_ANSWER\s*:\s*(.+)", response, flags=re.I)
               assert matches, (idx, response)
-              pred = matches[-1].strip().replace(" ", "")
+              pred = normalize_answer(matches[-1])
               assert pred == gold, (idx, pred, gold, response)
-          print("Official public sample: 3/3 exact final answers.")
+          print("Official public sample: 3/3 equivalent final answers.")
           PY
