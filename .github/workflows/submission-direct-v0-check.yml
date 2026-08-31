@@ -1,0 +1,74 @@
+name: submission-direct-v0-check
+
+on:
+  push:
+    branches: [submission-direct-v0]
+    paths:
+      - "user_agent.py"
+      - "tests/**"
+      - "requirements.txt"
+      - ".github/workflows/submission-direct-v0-check.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview
+      LOCAL_MAX_CONCURRENCY: "3"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Build official public sample
+        run: |
+          mkdir -p tmp/submission_direct_sample outputs/submission_direct_sample
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [
+              {"idx": 0, "problem": "设$\\mathbb{F}_{81}$为$81$元的有限域。$T=\\{\\alpha\\in\\mathbb{F}_{81}|\\mathbb{F}_{81}=\\mathbb{F}_3(\\alpha)\\}$。求$T$中元素的个数。"},
+              {"idx": 1, "problem": "Let $f_{\\text{inv}} : \\mathbb{R} \\to \\mathbb{R}$ be the inverse function of $f(x) = x^7 + x^5 + 3$. Put $F(x)=\\int_x^{-17} f_{\\text{inv}}(t)dt$. Find the numerical value of $F'(5)$."},
+              {"idx": 2, "problem": "设函数 $ f(z) = \\frac{1}{(z-1)(z-2)^2(z-3)^3} $，其中 $ z $ 为复变量。求 $ f(z) $ 在简单极点 $ z = 1 $ 处的留数。"},
+          ]
+          p = Path("tmp/submission_direct_sample/input.jsonl")
+          with p.open("w", encoding="utf-8") as f:
+              for row in rows:
+                  f.write(json.dumps(row, ensure_ascii=False) + "\n")
+          PY
+
+      - name: Run official public sample with code defaults
+        run: |
+          test -n "$INTERN_API_KEY"
+          python main.py \
+            --input_file tmp/submission_direct_sample/input.jsonl \
+            --output_dir outputs/submission_direct_sample
+
+      - name: Validate submission contract
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+          for idx in range(3):
+              p = Path("outputs/submission_direct_sample") / f"{idx}.json"
+              result = json.loads(p.read_text(encoding="utf-8"))
+              assert result.get("status") == "success", (idx, result)
+              response = result.get("final_response", "").strip()
+              assert response, idx
+              assert re.search(r"FINAL_ANSWER\s*:\s*\S+", response, flags=re.I), (idx, response)
+          print("Submission contract validated on all 3 public samples.")
+          PY
