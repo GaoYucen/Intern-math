@@ -1,0 +1,96 @@
+name: submission-v0-check
+
+on:
+  push:
+    branches: [submission-v0]
+    paths:
+      - "user_agent.py"
+      - "tests/**"
+      - "requirements.txt"
+      - ".github/workflows/submission-v0-check.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview
+      AGENT_MODE: direct
+      INTERN_THINKING_MODE: "0"
+      AGENT_MAX_TOKENS: "4096"
+      LOCAL_MAX_CONCURRENCY: "3"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Build official public sample
+        run: |
+          mkdir -p tmp/submission_sample outputs/submission_sample
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = [
+              {
+                  "idx": 0,
+                  "problem": "设$\\mathbb{F}_{81}$为$81$元的有限域。$T=\\{\\alpha\\in\\mathbb{F}_{81}|\\mathbb{F}_{81}=\\mathbb{F}_3(\\alpha)\\}$。求$T$中元素的个数。",
+                  "answer": "72",
+              },
+              {
+                  "idx": 1,
+                  "problem": "Let $f_{\\text{inv}} : \\mathbb{R} \\to \\mathbb{R}$ be the inverse function of $f(x) = x^7 + x^5 + 3$. Put $F(x)=\\int_x^{-17} f_{\\text{inv}}(t)dt$. Find the numerical value of $F'(5)$.",
+                  "answer": "-1",
+              },
+              {
+                  "idx": 2,
+                  "problem": "设函数 $ f(z) = \\frac{1}{(z-1)(z-2)^2(z-3)^3} $，其中 $ z $ 为复变量。求 $ f(z) $ 在简单极点 $ z = 1 $ 处的留数。",
+                  "answer": "-1/8",
+              },
+          ]
+          path = Path("tmp/submission_sample/input.jsonl")
+          with path.open("w", encoding="utf-8") as f:
+              for row in rows:
+                  f.write(json.dumps(row, ensure_ascii=False) + "\n")
+          PY
+
+      - name: Run official public sample
+        run: |
+          test -n "$INTERN_API_KEY"
+          python main.py \
+            --input_file tmp/submission_sample/input.jsonl \
+            --output_dir outputs/submission_sample
+
+      - name: Validate outputs
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          expected = {0: "72", 1: "-1", 2: "-1/8"}
+          for idx, gold in expected.items():
+              p = Path("outputs/submission_sample") / f"{idx}.json"
+              result = json.loads(p.read_text(encoding="utf-8"))
+              assert result.get("status") == "success", (idx, result)
+              response = result.get("final_response", "").strip()
+              assert response, idx
+              matches = re.findall(r"FINAL_ANSWER\s*:\s*(.+)", response, flags=re.I)
+              assert matches, (idx, response)
+              pred = matches[-1].strip().replace(" ", "")
+              assert pred == gold, (idx, pred, gold, response)
+          print("Official public sample: 3/3 exact final answers.")
+          PY
