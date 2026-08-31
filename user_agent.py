@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
@@ -6,13 +5,13 @@ from typing import Any, Dict, List
 BASE_SYSTEM_PROMPT = """You are a rigorous mathematical problem-solving agent.
 Solve the problem independently and prioritize correctness.
 
-Use careful internal reasoning, but keep the visible response concise and easy to grade.
+Use careful reasoning, but keep the visible response concise and easy to grade.
 
 Rules:
-1. For multiple-choice, numeric, symbolic, short-answer, and yes/no problems, return only one final line beginning with `FINAL_ANSWER:` followed by the actual answer.
-2. For proof/derivation problems, give only a concise proof containing the essential argument, then one final `FINAL_ANSWER:` line with the conclusion.
+1. For multiple-choice, numeric, symbolic, short-answer, and yes/no problems, end with one final line beginning with `FINAL_ANSWER:` followed by the actual answer.
+2. For proof/derivation problems, give only the essential proof or derivation, then one final `FINAL_ANSWER:` line with the conclusion.
 3. Never spend tokens exploring abandoned approaches, repeatedly checking settled work, or narrating uncertainty.
-4. Check signs, domains, assumptions, edge cases, and option labels before answering.
+4. Check signs, domains, assumptions, edge cases, counting overlaps, and option labels before answering.
 5. Do not literally copy placeholders such as `<answer>`.
 6. The final line is mandatory. Examples of format only:
    FINAL_ANSWER: B
@@ -22,41 +21,33 @@ Rules:
 The text after `FINAL_ANSWER:` must be the actual requested answer, not an explanation or meta-comment.
 """
 
-REFINE_SYSTEM_PROMPT = """You are a mathematical solution auditor.
-Independently verify the candidate answer. Think carefully but keep the visible
-response concise. Correct it if needed. For objective-answer questions, return
-only one line beginning with `FINAL_ANSWER:` followed by the actual answer. For
-a proof problem, give a concise repaired proof and then the final conclusion.
+REFINE_SYSTEM_PROMPT = """You are a strict mathematical solution auditor.
+Independently re-check the problem and candidate answer from scratch before accepting it.
+Look especially for algebraic slips, sign errors, domain/assumption mistakes, double counting,
+missing cases, unjustified proof steps, and mismatches between the requested quantity and the
+candidate's final answer. If the candidate is wrong, repair it.
+
+For objective-answer questions, keep the visible response concise and end with exactly one
+`FINAL_ANSWER:` line containing the corrected answer. For proof/derivation questions, give only
+a concise repaired argument containing the essential steps, then the `FINAL_ANSWER:` line.
 Never output a placeholder.
 """
 
 
 @dataclass(frozen=True)
 class AgentConfig:
-    """Submission-safe configuration with reproducible B0 defaults.
+    """Fixed competition submission configuration.
 
-    The validated competition baseline is a single direct call with thinking mode
-    disabled and a 4096-token cap. More expensive self-refine behavior remains
-    available only as an explicit local experiment.
+    submission-v0 uses a two-call solve-then-audit pipeline. Thinking mode is
+    disabled because earlier controlled tests showed more stable completion and
+    final-answer delivery with a 4096-token cap.
     """
 
-    mode: str = "direct"  # direct | self_refine
+    mode: str = "self_refine"  # submission default; direct remains available for tests
     thinking_mode: bool = False
     temperature: float = 0.15
     max_tokens: int = 4096
     refine_temperature: float = 0.0
-
-    @classmethod
-    def from_env(cls) -> "AgentConfig":
-        thinking_raw = os.environ.get("INTERN_THINKING_MODE", "0").strip().lower()
-        thinking = thinking_raw not in {"0", "false", "no", "off"}
-        return cls(
-            mode=os.environ.get("AGENT_MODE", "direct").strip().lower(),
-            thinking_mode=thinking,
-            temperature=float(os.environ.get("AGENT_TEMPERATURE", "0.15")),
-            max_tokens=int(os.environ.get("AGENT_MAX_TOKENS", "4096")),
-            refine_temperature=float(os.environ.get("REFINE_TEMPERATURE", "0.0")),
-        )
 
 
 class ReasoningAgent:
@@ -64,7 +55,7 @@ class ReasoningAgent:
 
     The official runner supplies the client and calls solve(problem, metadata).
     This implementation does not depend on hidden answers, cross-problem state,
-    local absolute paths, or private client fields.
+    local absolute paths, environment-specific model settings, or private client fields.
     """
 
     def __init__(
@@ -76,11 +67,10 @@ class ReasoningAgent:
     ) -> None:
         del args, kwargs  # tolerate harmless runner-side constructor extensions
         self.client = client
-        self.config = config or AgentConfig.from_env()
+        self.config = config or AgentConfig()
         if self.config.mode not in {"direct", "self_refine"}:
             raise ValueError(
-                f"Unsupported AGENT_MODE={self.config.mode!r}; "
-                "expected 'direct' or 'self_refine'."
+                f"Unsupported mode={self.config.mode!r}; expected 'direct' or 'self_refine'."
             )
 
     def solve(self, problem: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -122,12 +112,7 @@ class ReasoningAgent:
         temperature: float,
         max_tokens: int,
     ) -> Any:
-        """Call the official-like client while tolerating older compatible clients.
-
-        Current Intern clients support thinking_mode. If a runner provides a
-        compatible client whose Python signature does not expose that keyword,
-        retry without it; the first TypeError occurs before a network request.
-        """
+        """Call the official-like client and tolerate older compatible signatures."""
         try:
             return self.client.chat(
                 messages,
@@ -156,7 +141,7 @@ class ReasoningAgent:
         return self._require_text(response)
 
     def _refine(self, problem: str, candidate: str, idx: Any) -> str:
-        del idx  # kept in signature so future trace/session logic can use it safely.
+        del idx
         response = self._chat(
             [
                 {"role": "system", "content": REFINE_SYSTEM_PROMPT},
@@ -167,7 +152,7 @@ class ReasoningAgent:
                         f"{problem}\n\n"
                         "CANDIDATE SOLUTION:\n"
                         f"{candidate}\n\n"
-                        "Audit and, if necessary, correct the candidate."
+                        "Independently audit the candidate and return the corrected final response."
                     ),
                 },
             ],
