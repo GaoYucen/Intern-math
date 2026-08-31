@@ -1,0 +1,103 @@
+name: submission-v0-full
+
+on:
+  push:
+    branches: [submission-v0]
+    paths:
+      - ".github/workflows/submission-v0-full.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview
+      LOCAL_MAX_CONCURRENCY: "3"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Verify API key
+        run: test -n "$INTERN_API_KEY"
+
+      - name: Record experiment metadata
+        run: |
+          mkdir -p reports/self_refine_340
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          manifest = json.loads(Path('data/benchmark_v1/manifest.json').read_text(encoding='utf-8'))
+          meta = {
+              'commit_sha': os.environ.get('GITHUB_SHA'),
+              'branch': os.environ.get('GITHUB_REF_NAME'),
+              'model': os.environ.get('INTERN_MODEL'),
+              'agent_mode': 'self_refine (code default)',
+              'thinking_mode': False,
+              'max_tokens': 4096,
+              'solver_temperature': 0.15,
+              'refine_temperature': 0.0,
+              'concurrency': int(os.environ.get('LOCAL_MAX_CONCURRENCY', '3')),
+              'benchmark': 'Benchmark-v1',
+              'n_rows': manifest.get('n_rows'),
+              'benchmark_input_sha256': manifest.get('input_sha256'),
+              'benchmark_gold_sha256': manifest.get('gold_sha256'),
+          }
+          Path('reports/self_refine_340/run_metadata.json').write_text(
+              json.dumps(meta, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(meta, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Run 340-item self-refine benchmark
+        run: |
+          rm -rf outputs/self_refine_340
+          python main.py \
+            --input_file data/benchmark_v1/input.jsonl \
+            --output_dir outputs/self_refine_340
+
+      - name: Strict evaluation
+        if: always()
+        run: |
+          mkdir -p reports/self_refine_340/strict
+          python scripts/evaluate_outputs.py \
+            --benchmark data/benchmark_v1/gold.jsonl \
+            --output_dir outputs/self_refine_340 \
+            --report_dir reports/self_refine_340/strict || true
+
+      - name: Reference-based adjudication
+        if: always()
+        run: |
+          mkdir -p reports/self_refine_340/adjudicated
+          python scripts/adjudicate_results.py \
+            --benchmark data/benchmark_v1/gold.jsonl \
+            --output_dir outputs/self_refine_340 \
+            --report_dir reports/self_refine_340/adjudicated \
+            --judge-model intern-s1-pro \
+            --fallback-model intern-s2-preview \
+            --concurrency 2 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: submission-v0-self-refine-340-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            outputs/self_refine_340
+            reports/self_refine_340
