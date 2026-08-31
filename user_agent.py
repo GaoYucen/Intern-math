@@ -26,6 +26,7 @@ The text after `FINAL_ANSWER:` must be the actual requested answer, not an expla
 class AgentConfig:
     """Fixed, submission-safe configuration matching the validated B0 run."""
 
+    mode: str = "direct"
     thinking_mode: bool = False
     temperature: float = 0.15
     max_tokens: int = 4096
@@ -50,6 +51,8 @@ class ReasoningAgent:
         del args, kwargs
         self.client = client
         self.config = config or AgentConfig()
+        if self.config.mode != "direct":
+            raise ValueError("submission-direct-v0 supports direct mode only")
 
     def solve(self, problem: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
         del metadata
