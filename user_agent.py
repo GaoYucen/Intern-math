@@ -2,19 +2,17 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from llm_client import InternChatClient
-
 
 BASE_SYSTEM_PROMPT = """You are a rigorous mathematical problem-solving agent.
 Solve the problem independently and prioritize correctness.
 
-Use the model's internal reasoning to work carefully, but keep the visible response extremely concise.
+Use careful internal reasoning, but keep the visible response concise and easy to grade.
 
 Rules:
-1. For multiple-choice, numeric, symbolic, short-answer, and yes/no problems, do not expose a long derivation. Return only one final line beginning with `FINAL_ANSWER:` followed by the actual answer.
+1. For multiple-choice, numeric, symbolic, short-answer, and yes/no problems, return only one final line beginning with `FINAL_ANSWER:` followed by the actual answer.
 2. For proof/derivation problems, give only a concise proof containing the essential argument, then one final `FINAL_ANSWER:` line with the conclusion.
 3. Never spend tokens exploring abandoned approaches, repeatedly checking settled work, or narrating uncertainty.
-4. Check signs, domains, assumptions, edge cases, and option labels internally before answering.
+4. Check signs, domains, assumptions, edge cases, and option labels before answering.
 5. Do not literally copy placeholders such as `<answer>`.
 6. The final line is mandatory. Examples of format only:
    FINAL_ANSWER: B
@@ -35,44 +33,48 @@ Never output a placeholder.
 
 @dataclass(frozen=True)
 class AgentConfig:
-    """Configuration for controlled experiments.
+    """Submission-safe configuration with reproducible B0 defaults.
 
-    Default mode is deliberately a one-call baseline. More expensive behavior
-    is opt-in so that every improvement can be measured against the baseline.
+    The validated competition baseline is a single direct call with thinking mode
+    disabled and a 4096-token cap. More expensive self-refine behavior remains
+    available only as an explicit local experiment.
     """
 
     mode: str = "direct"  # direct | self_refine
-    thinking_mode: bool = True
+    thinking_mode: bool = False
     temperature: float = 0.15
-    max_tokens: int = 8192
+    max_tokens: int = 4096
     refine_temperature: float = 0.0
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
-        thinking_raw = os.environ.get("INTERN_THINKING_MODE", "1").strip().lower()
+        thinking_raw = os.environ.get("INTERN_THINKING_MODE", "0").strip().lower()
         thinking = thinking_raw not in {"0", "false", "no", "off"}
         return cls(
             mode=os.environ.get("AGENT_MODE", "direct").strip().lower(),
             thinking_mode=thinking,
             temperature=float(os.environ.get("AGENT_TEMPERATURE", "0.15")),
-            max_tokens=int(os.environ.get("AGENT_MAX_TOKENS", "8192")),
+            max_tokens=int(os.environ.get("AGENT_MAX_TOKENS", "4096")),
             refine_temperature=float(os.environ.get("REFINE_TEMPERATURE", "0.0")),
         )
 
 
 class ReasoningAgent:
-    """Competition-compatible reasoning agent.
+    """Competition-compatible mathematical reasoning agent.
 
-    Design principle: establish a strong, reproducible single-model baseline
-    first. The optional self-refine mode is kept behind a flag for ablation.
-    No hidden-test content or raw model response is copied into `trace`.
+    The official runner supplies the client and calls solve(problem, metadata).
+    This implementation does not depend on hidden answers, cross-problem state,
+    local absolute paths, or private client fields.
     """
 
     def __init__(
         self,
-        client: InternChatClient,
+        client: Any,
         config: AgentConfig | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
+        del args, kwargs  # tolerate harmless runner-side constructor extensions
         self.client = client
         self.config = config or AgentConfig.from_env()
         if self.config.mode not in {"direct", "self_refine"}:
@@ -113,21 +115,49 @@ class ReasoningAgent:
         )
         return {"final_response": refined, "trace": trace}
 
+    def _chat(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        temperature: float,
+        max_tokens: int,
+    ) -> Any:
+        """Call the official-like client while tolerating older compatible clients.
+
+        Current Intern clients support thinking_mode. If a runner provides a
+        compatible client whose Python signature does not expose that keyword,
+        retry without it; the first TypeError occurs before a network request.
+        """
+        try:
+            return self.client.chat(
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                thinking_mode=self.config.thinking_mode,
+            )
+        except TypeError as exc:
+            if "thinking_mode" not in str(exc):
+                raise
+            return self.client.chat(
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+
     def _solve_once(self, problem: str) -> str:
-        response = self.client.chat(
+        response = self._chat(
             [
                 {"role": "system", "content": BASE_SYSTEM_PROMPT},
                 {"role": "user", "content": problem},
             ],
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
-            thinking_mode=self.config.thinking_mode,
         )
         return self._require_text(response)
 
     def _refine(self, problem: str, candidate: str, idx: Any) -> str:
         del idx  # kept in signature so future trace/session logic can use it safely.
-        response = self.client.chat(
+        response = self._chat(
             [
                 {"role": "system", "content": REFINE_SYSTEM_PROMPT},
                 {
@@ -143,7 +173,6 @@ class ReasoningAgent:
             ],
             temperature=self.config.refine_temperature,
             max_tokens=self.config.max_tokens,
-            thinking_mode=self.config.thinking_mode,
         )
         return self._require_text(response)
 
