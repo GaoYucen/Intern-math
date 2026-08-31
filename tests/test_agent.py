@@ -72,7 +72,7 @@ class AgentTest(unittest.TestCase):
     def test_compatible_with_client_without_thinking_mode_keyword(self):
         client = OfficialLikeClientWithoutThinkingKeyword()
         agent = ReasoningAgent(client, AgentConfig())
-        out = agent.solve("6*7?", {"idx": 1}, ignored_by_runner=True) if False else agent.solve("6*7?", {"idx": 1})
+        out = agent.solve("6*7?", {"idx": 1})
         self.assertEqual(out["final_response"], "FINAL_ANSWER: 42")
         self.assertEqual(len(client.calls), 1)
         self.assertEqual(client.calls[0]["max_tokens"], 4096)
