@@ -17,7 +17,7 @@ jobs:
     env:
       INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
       INTERN_MODEL: intern-s2-preview
-      AGENT_MODE: direct
+      AGENT_MODE: self_refine
       INTERN_THINKING_MODE: "0"
       AGENT_MAX_TOKENS: "4096"
       LOCAL_MAX_CONCURRENCY: "3"
