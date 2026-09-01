@@ -33,19 +33,27 @@ Never output a placeholder.
 """
 
 
+def _optional_float(name: str) -> float | None:
+    raw = os.environ.get(name, "").strip()
+    return float(raw) if raw else None
+
+
+def _optional_int(name: str) -> int | None:
+    raw = os.environ.get(name, "").strip()
+    return int(raw) if raw else None
+
+
 @dataclass(frozen=True)
 class AgentConfig:
-    """Configuration for controlled experiments.
-
-    Default mode is deliberately a one-call baseline. More expensive behavior
-    is opt-in so that every improvement can be measured against the baseline.
-    """
+    """Configuration for controlled experiments."""
 
     mode: str = "direct"  # direct | self_refine
     thinking_mode: bool = True
     temperature: float = 0.15
     max_tokens: int = 8192
     refine_temperature: float = 0.0
+    top_p: float | None = None
+    top_k: int | None = None
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -57,16 +65,13 @@ class AgentConfig:
             temperature=float(os.environ.get("AGENT_TEMPERATURE", "0.15")),
             max_tokens=int(os.environ.get("AGENT_MAX_TOKENS", "8192")),
             refine_temperature=float(os.environ.get("REFINE_TEMPERATURE", "0.0")),
+            top_p=_optional_float("AGENT_TOP_P"),
+            top_k=_optional_int("AGENT_TOP_K"),
         )
 
 
 class ReasoningAgent:
-    """Competition-compatible reasoning agent.
-
-    Design principle: establish a strong, reproducible single-model baseline
-    first. The optional self-refine mode is kept behind a flag for ablation.
-    No hidden-test content or raw model response is copied into `trace`.
-    """
+    """Competition-compatible reasoning agent for controlled calibration."""
 
     def __init__(
         self,
@@ -113,6 +118,14 @@ class ReasoningAgent:
         )
         return {"final_response": refined, "trace": trace}
 
+    def _sampling_kwargs(self) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {}
+        if self.config.top_p is not None:
+            kwargs["top_p"] = self.config.top_p
+        if self.config.top_k is not None:
+            kwargs["top_k"] = self.config.top_k
+        return kwargs
+
     def _solve_once(self, problem: str) -> str:
         response = self.client.chat(
             [
@@ -122,11 +135,12 @@ class ReasoningAgent:
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
             thinking_mode=self.config.thinking_mode,
+            **self._sampling_kwargs(),
         )
         return self._require_text(response)
 
     def _refine(self, problem: str, candidate: str, idx: Any) -> str:
-        del idx  # kept in signature so future trace/session logic can use it safely.
+        del idx
         response = self.client.chat(
             [
                 {"role": "system", "content": REFINE_SYSTEM_PROMPT},
@@ -144,6 +158,7 @@ class ReasoningAgent:
             temperature=self.config.refine_temperature,
             max_tokens=self.config.max_tokens,
             thinking_mode=self.config.thinking_mode,
+            **self._sampling_kwargs(),
         )
         return self._require_text(response)
 
