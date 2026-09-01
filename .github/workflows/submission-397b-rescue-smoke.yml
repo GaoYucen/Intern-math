@@ -1,0 +1,120 @@
+name: submission-397b-rescue-smoke
+
+on:
+  push:
+    branches: [submission-397b-v1]
+    paths:
+      - ".github/workflows/submission-397b-rescue-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rescue-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview-397b
+      AGENT_MODE: rescue
+      INTERN_THINKING_MODE: "1"
+      AGENT_MAX_TOKENS: "8192"
+      AGENT_RESCUE_MAX_TOKENS: "4096"
+      AGENT_TEMPERATURE: "0.15"
+      AGENT_RESCUE_TEMPERATURE: "0.15"
+      LOCAL_MAX_CONCURRENCY: "2"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Verify API key
+        run: test -n "$INTERN_API_KEY"
+
+      - name: Build trusted stress set
+        run: python scripts/build_long_reasoning_stress.py
+
+      - name: Build 8-item rescue cohort
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          ids = {0, 1, 2, 5, 6, 7, 9, 18}
+          src = Path('data/long_reasoning_stress/input.jsonl')
+          dst = Path('data/long_reasoning_stress/rescue8.jsonl')
+          rows = [json.loads(x) for x in src.read_text(encoding='utf-8').splitlines() if x.strip()]
+          chosen = [r for r in rows if int(r['idx']) in ids]
+          assert {int(r['idx']) for r in chosen} == ids
+          dst.write_text(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in chosen), encoding='utf-8')
+          print('rescue_ids=', sorted(ids))
+          PY
+
+      - name: Run targeted rescue cohort
+        run: |
+          rm -rf outputs/submission397/rescue8
+          python main.py \
+            --input_file data/long_reasoning_stress/rescue8.jsonl \
+            --output_dir outputs/submission397/rescue8
+
+      - name: Strict evaluation
+        if: always()
+        run: |
+          python scripts/evaluate_outputs.py \
+            --benchmark data/long_reasoning_stress/gold.jsonl \
+            --output_dir outputs/submission397/rescue8 \
+            --report_dir reports/submission397/rescue8 || true
+
+      - name: Reference-based adjudication
+        if: always()
+        run: |
+          python scripts/adjudicate_results.py \
+            --benchmark data/long_reasoning_stress/gold.jsonl \
+            --output_dir outputs/submission397/rescue8 \
+            --report_dir reports/submission397/rescue8/adjudicated \
+            --judge-model intern-s1-pro \
+            --fallback-model intern-s2-preview \
+            --concurrency 2 || true
+
+      - name: Rescue trace summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out = Path('outputs/submission397/rescue8')
+          summary = {'success': 0, 'error': 0, 'rescued': 0, 'api_recovered': 0, 'final_markers': 0}
+          for p in out.glob('*.json'):
+              row = json.loads(p.read_text(encoding='utf-8'))
+              if row.get('status') == 'success':
+                  summary['success'] += 1
+                  text = row.get('final_response', '')
+                  if 'FINAL_ANSWER:' in text.upper(): summary['final_markers'] += 1
+                  steps = [x.get('step') for x in row.get('trace', [])]
+                  if 'conditional_rescue' in steps: summary['rescued'] += 1
+                  if 'api_failure_recovery' in steps: summary['api_recovered'] += 1
+              else:
+                  summary['error'] += 1
+          print(json.dumps(summary, indent=2))
+          Path('reports/submission397/rescue8/trace_summary.json').write_text(json.dumps(summary, indent=2)+'\n', encoding='utf-8')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: submission-397b-rescue8-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            outputs/submission397/rescue8
+            reports/submission397/rescue8
