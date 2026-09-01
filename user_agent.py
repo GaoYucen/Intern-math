@@ -24,12 +24,17 @@ Rules:
 The text after `FINAL_ANSWER:` must be the actual requested answer, not an explanation or meta-comment.
 """
 
-REFINE_SYSTEM_PROMPT = """You are a mathematical solution auditor.
-Independently verify the candidate answer. Think carefully but keep the visible
-response concise. Correct it if needed. For objective-answer questions, return
-only one line beginning with `FINAL_ANSWER:` followed by the actual answer. For
-a proof problem, give a concise repaired proof and then the final conclusion.
-Never output a placeholder.
+RESCUE_SYSTEM_PROMPT = """You are a mathematical completion agent.
+A strong solver already attempted the problem but did not produce the required final marker.
+Preserve any mathematically correct work already present. Do not restart from scratch unless the prior work is unusable.
+If the prior work already contains the answer, simply extract and format it. If it is incomplete, finish only the missing mathematical steps.
+Be decisive and concise. End with exactly one line beginning `FINAL_ANSWER:` followed by the actual requested answer.
+For proof problems, include only the minimal missing argument before that final line.
+"""
+
+FALLBACK_SYSTEM_PROMPT = """Solve this mathematical problem carefully but efficiently.
+Prioritize reaching a final answer within the remaining budget. Avoid exploratory digressions.
+End with exactly one line beginning `FINAL_ANSWER:` followed by the actual requested answer.
 """
 
 
@@ -45,13 +50,14 @@ def _optional_int(name: str) -> int | None:
 
 @dataclass(frozen=True)
 class AgentConfig:
-    """Configuration for controlled experiments."""
+    """Submission configuration with conditional rescue only on observable failure."""
 
-    mode: str = "direct"  # direct | self_refine
+    mode: str = "rescue"  # rescue | direct
     thinking_mode: bool = True
     temperature: float = 0.15
     max_tokens: int = 8192
-    refine_temperature: float = 0.0
+    rescue_max_tokens: int = 4096
+    rescue_temperature: float = 0.15
     top_p: float | None = None
     top_k: int | None = None
 
@@ -60,37 +66,64 @@ class AgentConfig:
         thinking_raw = os.environ.get("INTERN_THINKING_MODE", "1").strip().lower()
         thinking = thinking_raw not in {"0", "false", "no", "off"}
         return cls(
-            mode=os.environ.get("AGENT_MODE", "direct").strip().lower(),
+            mode=os.environ.get("AGENT_MODE", "rescue").strip().lower(),
             thinking_mode=thinking,
             temperature=float(os.environ.get("AGENT_TEMPERATURE", "0.15")),
             max_tokens=int(os.environ.get("AGENT_MAX_TOKENS", "8192")),
-            refine_temperature=float(os.environ.get("REFINE_TEMPERATURE", "0.0")),
+            rescue_max_tokens=int(os.environ.get("AGENT_RESCUE_MAX_TOKENS", "4096")),
+            rescue_temperature=float(os.environ.get("AGENT_RESCUE_TEMPERATURE", "0.15")),
             top_p=_optional_float("AGENT_TOP_P"),
             top_k=_optional_int("AGENT_TOP_K"),
         )
 
 
 class ReasoningAgent:
-    """Competition-compatible reasoning agent for controlled calibration."""
+    """Competition-compatible 397B agent with conservative failure recovery."""
 
     def __init__(
         self,
         client: InternChatClient,
         config: AgentConfig | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
+        del args, kwargs
         self.client = client
         self.config = config or AgentConfig.from_env()
-        if self.config.mode not in {"direct", "self_refine"}:
+        if self.config.mode not in {"direct", "rescue"}:
             raise ValueError(
-                f"Unsupported AGENT_MODE={self.config.mode!r}; "
-                "expected 'direct' or 'self_refine'."
+                f"Unsupported AGENT_MODE={self.config.mode!r}; expected 'direct' or 'rescue'."
             )
 
     def solve(self, problem: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
-        idx = metadata.get("idx", 0)
+        del metadata
         trace: List[Dict[str, Any]] = []
 
-        first = self._solve_once(problem)
+        try:
+            first = self._solve_once(problem)
+        except Exception as exc:
+            trace.append(
+                {
+                    "step": "direct_solver",
+                    "content": {"status": "error", "error_type": type(exc).__name__},
+                }
+            )
+            if self.config.mode != "rescue":
+                raise
+            recovered = self._fallback_solve(problem)
+            trace.append(
+                {
+                    "step": "api_failure_recovery",
+                    "content": {
+                        "status": "completed",
+                        "response_chars": len(recovered),
+                        "thinking_mode": self.config.thinking_mode,
+                    },
+                }
+            )
+            return {"final_response": recovered, "trace": trace}
+
+        has_final = self._has_final_marker(first)
         trace.append(
             {
                 "step": "direct_solver",
@@ -98,25 +131,39 @@ class ReasoningAgent:
                     "status": "completed",
                     "response_chars": len(first),
                     "thinking_mode": self.config.thinking_mode,
+                    "has_final_marker": has_final,
                 },
             }
         )
 
-        if self.config.mode == "direct":
+        # High-confidence path: never touch a completed answer.
+        if self.config.mode == "direct" or has_final:
             return {"final_response": first, "trace": trace}
 
-        refined = self._refine(problem, first, idx)
+        try:
+            rescued = self._rescue(problem, first)
+        except Exception as exc:
+            trace.append(
+                {
+                    "step": "conditional_rescue",
+                    "content": {"status": "error", "error_type": type(exc).__name__},
+                }
+            )
+            return {"final_response": first, "trace": trace}
+
+        rescue_has_final = self._has_final_marker(rescued)
         trace.append(
             {
-                "step": "self_refine",
+                "step": "conditional_rescue",
                 "content": {
                     "status": "completed",
-                    "response_chars": len(refined),
-                    "thinking_mode": self.config.thinking_mode,
+                    "response_chars": len(rescued),
+                    "has_final_marker": rescue_has_final,
                 },
             }
         )
-        return {"final_response": refined, "trace": trace}
+        # Never replace a usable first response with another unfinished response.
+        return {"final_response": rescued if rescue_has_final else first, "trace": trace}
 
     def _sampling_kwargs(self) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {}
@@ -139,28 +186,44 @@ class ReasoningAgent:
         )
         return self._require_text(response)
 
-    def _refine(self, problem: str, candidate: str, idx: Any) -> str:
-        del idx
+    def _rescue(self, problem: str, candidate: str) -> str:
         response = self.client.chat(
             [
-                {"role": "system", "content": REFINE_SYSTEM_PROMPT},
+                {"role": "system", "content": RESCUE_SYSTEM_PROMPT},
                 {
                     "role": "user",
                     "content": (
                         "PROBLEM:\n"
                         f"{problem}\n\n"
-                        "CANDIDATE SOLUTION:\n"
+                        "PRIOR ATTEMPT:\n"
                         f"{candidate}\n\n"
-                        "Audit and, if necessary, correct the candidate."
+                        "Complete or extract the answer now."
                     ),
                 },
             ],
-            temperature=self.config.refine_temperature,
-            max_tokens=self.config.max_tokens,
+            temperature=self.config.rescue_temperature,
+            max_tokens=self.config.rescue_max_tokens,
             thinking_mode=self.config.thinking_mode,
             **self._sampling_kwargs(),
         )
         return self._require_text(response)
+
+    def _fallback_solve(self, problem: str) -> str:
+        response = self.client.chat(
+            [
+                {"role": "system", "content": FALLBACK_SYSTEM_PROMPT},
+                {"role": "user", "content": problem},
+            ],
+            temperature=self.config.rescue_temperature,
+            max_tokens=self.config.rescue_max_tokens,
+            thinking_mode=self.config.thinking_mode,
+            **self._sampling_kwargs(),
+        )
+        return self._require_text(response)
+
+    @staticmethod
+    def _has_final_marker(text: str) -> bool:
+        return "FINAL_ANSWER:" in text.upper()
 
     @staticmethod
     def _require_text(response: Any) -> str:
