@@ -1,0 +1,77 @@
+name: fresh-holdout-v1-build
+
+on:
+  push:
+    branches: [fresh-holdout-v1]
+    paths:
+      - "scripts/build_fresh_holdout_v1.py"
+      - "scripts/collect_public_speculative_sets.py"
+      - "data/fresh_holdout_v1/**"
+      - ".github/workflows/fresh-holdout-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build scored fresh holdout
+        run: python scripts/build_fresh_holdout_v1.py
+
+      - name: Validate scored schema and uniqueness
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+          p = Path('data/fresh_holdout_v1/scored.jsonl')
+          rows = [json.loads(x) for x in p.read_text(encoding='utf-8').splitlines() if x.strip()]
+          assert len(rows) == 72
+          assert len({r['problem'] for r in rows}) == 72
+          assert len({r['idx'] for r in rows}) == 72
+          c = Counter(r['subject'] for r in rows)
+          assert len(c) == 18 and set(c.values()) == {4}, c
+          assert all(r.get('answer') not in (None, '') for r in rows)
+          print('schema_ok', dict(c))
+          PY
+
+      - name: Collect public speculative sets
+        continue-on-error: true
+        run: python scripts/collect_public_speculative_sets.py --output-dir data/fresh_holdout_v1/collected
+
+      - name: Show build summary
+        if: always()
+        run: |
+          cat data/fresh_holdout_v1/scored_summary.json
+          if [ -f data/fresh_holdout_v1/collected/collection_report.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          x=json.loads(Path('data/fresh_holdout_v1/collected/collection_report.json').read_text())
+          print(json.dumps({
+            'unique_problem_count': x.get('unique_problem_count'),
+            'with_gold': x.get('with_gold'),
+            'without_gold': x.get('without_gold'),
+            'sources': [{'name': s.get('name'), 'clone_ok': s.get('clone_ok'), 'files': s.get('files')} for s in x.get('sources', [])],
+          }, ensure_ascii=False, indent=2))
+          PY
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fresh-holdout-v1-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            data/fresh_holdout_v1/scored.jsonl
+            data/fresh_holdout_v1/scored_summary.json
+            data/fresh_holdout_v1/source_manifest.json
+            data/fresh_holdout_v1/collected
