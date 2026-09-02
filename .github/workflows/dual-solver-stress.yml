@@ -1,0 +1,127 @@
+name: dual-solver-stress
+
+on:
+  push:
+    branches: [submission-agent-v2]
+    paths:
+      - "user_agent.py"
+      - "tests/test_agent.py"
+      - ".github/workflows/dual-solver-stress.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview-397b
+      AGENT_MODE: dual
+      AGENT_SOLVER_A_THINKING: "0"
+      AGENT_SOLVER_B_THINKING: "0"
+      AGENT_CHOOSER_THINKING: "0"
+      AGENT_SOLVER_TOKENS: "4096"
+      AGENT_CHOOSER_TOKENS: "2048"
+      AGENT_SOLVER_A_TEMPERATURE: "0.15"
+      AGENT_SOLVER_B_TEMPERATURE: "0.35"
+      AGENT_CHOOSER_TEMPERATURE: "0.0"
+      LOCAL_MAX_CONCURRENCY: "3"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Verify API key
+        run: test -n "$INTERN_API_KEY"
+
+      - name: Build 40-item hard stress set
+        run: python scripts/build_long_reasoning_stress.py
+
+      - name: Run bounded dual solver
+        run: |
+          rm -rf outputs/dual_v2/stress40
+          python main.py \
+            --input_file data/long_reasoning_stress/input.jsonl \
+            --output_dir outputs/dual_v2/stress40
+
+      - name: Strict evaluation
+        if: always()
+        run: |
+          python scripts/evaluate_outputs.py \
+            --benchmark data/long_reasoning_stress/gold.jsonl \
+            --output_dir outputs/dual_v2/stress40 \
+            --report_dir reports/dual_v2/stress40 || true
+
+      - name: Reference-based adjudication
+        if: always()
+        run: |
+          python scripts/adjudicate_results.py \
+            --benchmark data/long_reasoning_stress/gold.jsonl \
+            --output_dir outputs/dual_v2/stress40 \
+            --report_dir reports/dual_v2/stress40/adjudicated \
+            --judge-model intern-s1-pro \
+            --fallback-model intern-s2-preview \
+            --concurrency 2 || true
+
+      - name: Gate and latency summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out = Path('outputs/dual_v2/stress40')
+          s = {
+              'records': 0,
+              'success': 0,
+              'error': 0,
+              'agreement': 0,
+              'chooser': 0,
+              'solver_a_final': 0,
+              'solver_b_final': 0,
+              'final_marker': 0,
+              'response_chars': 0,
+          }
+          for p in out.glob('*.json'):
+              row = json.loads(p.read_text(encoding='utf-8'))
+              s['records'] += 1
+              if row.get('status') == 'success':
+                  s['success'] += 1
+                  text = row.get('final_response', '')
+                  s['response_chars'] += len(text)
+                  if 'FINAL_ANSWER:' in text.upper(): s['final_marker'] += 1
+                  for tr in row.get('trace', []):
+                      step = tr.get('step')
+                      if step == 'agreement_gate': s['agreement'] += 1
+                      elif step == 'chooser': s['chooser'] += 1
+                      elif step == 'solver_a' and tr.get('content', {}).get('has_final_marker'): s['solver_a_final'] += 1
+                      elif step == 'solver_b' and tr.get('content', {}).get('has_final_marker'): s['solver_b_final'] += 1
+              else:
+                  s['error'] += 1
+          if s['success']:
+              s['mean_final_response_chars'] = s['response_chars'] / s['success']
+          print(json.dumps(s, indent=2))
+          Path('reports/dual_v2/stress40/gate_summary.json').write_text(json.dumps(s, indent=2)+'\n', encoding='utf-8')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dual-solver-stress-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            outputs/dual_v2/stress40
+            reports/dual_v2/stress40
