@@ -1,0 +1,114 @@
+name: fresh-holdout-v1-calibration
+
+on:
+  push:
+    branches: [fresh-holdout-v1]
+    paths:
+      - ".github/workflows/fresh-holdout-calibration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: direct_a
+            agent_mode: direct_a
+          - name: dual
+            agent_mode: dual
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview-397b
+      AGENT_MODE: ${{ matrix.agent_mode }}
+      AGENT_SOLVER_A_THINKING: "0"
+      AGENT_SOLVER_B_THINKING: "0"
+      AGENT_CHOOSER_THINKING: "0"
+      AGENT_SOLVER_TOKENS: "4096"
+      AGENT_CHOOSER_TOKENS: "2048"
+      AGENT_SOLVER_A_TEMPERATURE: "0.15"
+      AGENT_SOLVER_B_TEMPERATURE: "0.35"
+      AGENT_CHOOSER_TEMPERATURE: "0.0"
+      LOCAL_MAX_CONCURRENCY: "3"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Build frozen fresh holdout
+        run: python scripts/build_fresh_holdout_v1.py
+      - name: Verify frozen hash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          x=json.loads(Path('data/fresh_holdout_v1/scored_summary.json').read_text())
+          expected='94e6f919d9ade2d823afb86c81d183f3a408c218ffd5a169eae0cc8ce69eed9f'
+          assert x['sha256']==expected, (x['sha256'], expected)
+          print('frozen_hash_ok', expected)
+          PY
+      - name: Run agent
+        run: |
+          rm -rf outputs/fresh_holdout_v1/${{ matrix.name }}
+          python main.py \
+            --input_file data/fresh_holdout_v1/scored.jsonl \
+            --output_dir outputs/fresh_holdout_v1/${{ matrix.name }}
+      - name: Strict evaluation
+        if: always()
+        run: |
+          python scripts/evaluate_outputs.py \
+            --benchmark data/fresh_holdout_v1/scored.jsonl \
+            --output_dir outputs/fresh_holdout_v1/${{ matrix.name }} \
+            --report_dir reports/fresh_holdout_v1/${{ matrix.name }} || true
+      - name: Reference adjudication
+        if: always()
+        run: |
+          python scripts/adjudicate_results.py \
+            --benchmark data/fresh_holdout_v1/scored.jsonl \
+            --output_dir outputs/fresh_holdout_v1/${{ matrix.name }} \
+            --report_dir reports/fresh_holdout_v1/${{ matrix.name }}/adjudicated \
+            --judge-model intern-s1-pro \
+            --fallback-model intern-s2-preview \
+            --concurrency 2 || true
+      - name: Gate summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out=Path('outputs/fresh_holdout_v1/${{ matrix.name }}')
+          s={'records':0,'success':0,'error':0,'agreement':0,'chooser':0,'solver_a_final':0,'solver_b_final':0,'final_marker':0}
+          for p in out.glob('*.json'):
+            row=json.loads(p.read_text(encoding='utf-8')); s['records']+=1
+            if row.get('status')!='success': s['error']+=1; continue
+            s['success']+=1
+            text=row.get('final_response','')
+            if 'FINAL_ANSWER:' in text.upper(): s['final_marker']+=1
+            for tr in row.get('trace',[]):
+              step=tr.get('step'); c=tr.get('content',{})
+              if step=='agreement_gate': s['agreement']+=1
+              elif step=='chooser': s['chooser']+=1
+              elif step=='solver_a' and c.get('has_final_marker'): s['solver_a_final']+=1
+              elif step=='solver_b' and c.get('has_final_marker'): s['solver_b_final']+=1
+          print(json.dumps(s,indent=2))
+          Path('reports/fresh_holdout_v1/${{ matrix.name }}/gate_summary.json').write_text(json.dumps(s,indent=2)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fresh-holdout-v1-${{ matrix.name }}-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            outputs/fresh_holdout_v1/${{ matrix.name }}
+            reports/fresh_holdout_v1/${{ matrix.name }}
+            data/fresh_holdout_v1/scored_summary.json
