@@ -5,6 +5,7 @@ on:
     branches: [submission-agent-v2]
     paths:
       - "user_agent.py"
+      - "main.py"
       - "tests/test_agent.py"
       - ".github/workflows/dual-solver-stress.yml"
   workflow_dispatch:
