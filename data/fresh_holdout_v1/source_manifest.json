@@ -1,0 +1,40 @@
+{
+  "version": "fresh-holdout-v1",
+  "created": "2026-09-03",
+  "purpose": "Build a competition-relevant calibration set without treating public challenge-associated material as official hidden data.",
+  "included_public_sources": [
+    {
+      "name": "sentuyu1/intern-s1-math-agent",
+      "repo": "https://github.com/sentuyu1/intern-s1-math-agent.git",
+      "files": ["18_problems.json", "38_hard_problems.json", "36_extreme_hard.json", "sample_18_domains.json"],
+      "role": "unscored_external_robustness",
+      "confidence": "challenge-associated but user-authored; not verified official questions"
+    },
+    {
+      "name": "2401_88896705/66",
+      "repo": "https://gitcode.com/2401_88896705/66.git",
+      "files": ["sample_data/extra15.jsonl", "sample_data/hard20.jsonl"],
+      "role": "external_local_benchmark",
+      "confidence": "repository explicitly describes these as local self-test data and not the hidden test set"
+    },
+    {
+      "name": "tjmath-tiaozhan/challenge-cup-2026-v7-submission",
+      "repo": "https://gitcode.com/tjmath-tiaozhan/challenge-cup-2026-v7-submission.git",
+      "files": ["dev.jsonl", "sample_data/dev.jsonl"],
+      "role": "external_local_benchmark",
+      "confidence": "challenge submission repository local sample only"
+    }
+  ],
+  "excluded_sources": [
+    {
+      "name": "sentuyu1/Challenge-Cup-2026-math-agent exact-eval mapping assets",
+      "reason": "Recent public commit messages claim one-to-one correspondence with the 112 evaluation questions and direct standard-answer lookup. Those exact-match/eval-answer assets are excluded to avoid hidden-evaluation contamination."
+    }
+  ],
+  "policy": {
+    "public_speculative_material_is_not_official": true,
+    "do_not_train_or_route_on_exact_hidden_question_fingerprints": true,
+    "do_not_copy_hidden_answers_into_submission_code": true,
+    "freeze_scored_holdout_after_generation": true
+  }
+}
