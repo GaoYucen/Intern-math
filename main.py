@@ -93,6 +93,17 @@ async def process_item(
         print(f"Finished idx={item['idx']}")
 
 
+def config_summary(agent: ReasoningAgent) -> str:
+    config = getattr(agent, "config", None)
+    if config is None:
+        return "unknown"
+    try:
+        items = vars(config).items()
+    except TypeError:
+        return type(config).__name__
+    return ", ".join(f"{key}={value}" for key, value in items)
+
+
 async def run(args: argparse.Namespace) -> None:
     input_path = Path(args.input_file)
     output_dir = Path(args.output_dir)
@@ -104,8 +115,7 @@ async def run(args: argparse.Namespace) -> None:
 
     print(
         f"Loaded {len(items)} items. Max concurrency: {LOCAL_MAX_CONCURRENCY}. "
-        f"Model: {client.model}; mode: {agent.config.mode}; "
-        f"thinking: {agent.config.thinking_mode}."
+        f"Model: {client.model}; config: {config_summary(agent)}."
     )
     tasks = [process_item(agent, item, output_dir, semaphore) for item in items]
     await asyncio.gather(*tasks)
