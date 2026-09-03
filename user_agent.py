@@ -1,7 +1,7 @@
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 SOLVER_A_PROMPT = """You are the primary mathematical solver. Solve the problem independently and prioritize correctness, but your inference budget is limited.
@@ -120,11 +120,14 @@ class ReasoningAgent:
 
         if self.config.mode == "hybrid":
             # Destructive-rate guard: if the strong primary already delivered a
-            # closed answer (explicit final marker or balanced boxed result), do
-            # not touch it with another model call.
+            # closed answer, never send it through another model. A terminal
+            # boxed answer may be normalized deterministically to FINAL_ANSWER.
             if self._has_closed_answer(a):
+                delivered, normalized = self._ensure_explicit_final(a)
                 trace.append({"step": "closure_gate", "content": {"status": "primary_closed"}})
-                return {"final_response": a, "trace": trace}
+                if normalized:
+                    trace.append({"step": "delivery_normalization", "content": {"status": "boxed_to_final"}})
+                return {"final_response": delivered, "trace": trace}
 
             finalizer_input = (
                 f"PROBLEM:\n{problem}\n\n"
@@ -142,8 +145,11 @@ class ReasoningAgent:
             trace.append(self._trace_entry("finalizer", finalized, False))
 
             if self._has_closed_answer(finalized):
+                delivered, normalized = self._ensure_explicit_final(finalized)
                 trace.append({"step": "closure_gate", "content": {"status": "finalizer_closed"}})
-                return {"final_response": finalized, "trace": trace}
+                if normalized:
+                    trace.append({"step": "delivery_normalization", "content": {"status": "boxed_to_final"}})
+                return {"final_response": delivered, "trace": trace}
 
             # A failed finalizer must never destroy non-empty primary evidence.
             trace.append({"step": "closure_gate", "content": {"status": "finalizer_failed"}})
@@ -250,7 +256,7 @@ class ReasoningAgent:
         return matches[-1].strip()
 
     @staticmethod
-    def _extract_last_boxed(text: str) -> Optional[str]:
+    def _extract_last_boxed_span(text: str) -> Optional[Tuple[str, int]]:
         text = text or ""
         needle = "\\boxed{"
         start = text.rfind(needle)
@@ -265,15 +271,52 @@ class ReasoningAgent:
             elif text[i] == "}":
                 depth -= 1
                 if depth == 0:
-                    return text[body_start:i].strip()
+                    return text[body_start:i].strip(), i + 1
             i += 1
         return None
 
     @classmethod
+    def _extract_last_boxed(cls, text: str) -> Optional[str]:
+        span = cls._extract_last_boxed_span(text)
+        return span[0] if span is not None else None
+
+    @classmethod
+    def _extract_terminal_boxed(cls, text: str) -> Optional[str]:
+        """Return a boxed answer only when it is effectively terminal.
+
+        Models sometimes box intermediate quantities while continuing a long
+        derivation. Treating any box as final would skip the finalizer and can
+        turn an intermediate value into the submitted answer. We therefore only
+        accept a box when the remaining suffix is TeX/punctuation whitespace.
+        """
+        span = cls._extract_last_boxed_span(text)
+        if span is None:
+            return None
+        body, end = span
+        tail = (text or "")[end:]
+        tail = tail.replace("$$", "").replace("\\)", "").replace("\\]", "")
+        tail = re.sub(r"[\s$`.,;:!?。；，：！？]+", "", tail)
+        return body if not tail else None
+
+    @classmethod
     def _has_closed_answer(cls, text: str) -> bool:
         return bool(text) and (
-            cls._extract_final_answer(text) is not None or cls._extract_last_boxed(text) is not None
+            cls._extract_final_answer(text) is not None or cls._extract_terminal_boxed(text) is not None
         )
+
+    @classmethod
+    def _ensure_explicit_final(cls, text: str) -> Tuple[str, bool]:
+        """Deterministically normalize a terminal boxed result to FINAL_ANSWER.
+
+        This performs no new mathematical reasoning and never changes a response
+        that already has an explicit FINAL_ANSWER marker.
+        """
+        if cls._extract_final_answer(text) is not None:
+            return text, False
+        boxed = cls._extract_terminal_boxed(text)
+        if boxed is None:
+            return text, False
+        return text.rstrip() + f"\nFINAL_ANSWER: {boxed}", True
 
     @staticmethod
     def _normalize_answer(answer: str) -> str:
