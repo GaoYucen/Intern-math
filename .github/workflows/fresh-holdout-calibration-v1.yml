@@ -1,0 +1,118 @@
+name: fresh-holdout-calibration-v1
+
+on:
+  push:
+    branches: [fresh-holdout-calibration-v1]
+    paths:
+      - ".github/workflows/fresh-holdout-calibration-v1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - name: off4k
+            mode: direct_a
+            a_thinking: "0"
+            solver_tokens: "4096"
+          - name: on8k
+            mode: direct_a
+            a_thinking: "1"
+            solver_tokens: "8192"
+          - name: dual4k
+            mode: dual
+            a_thinking: "0"
+            solver_tokens: "4096"
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview-397b
+      AGENT_MODE: ${{ matrix.mode }}
+      AGENT_SOLVER_A_THINKING: ${{ matrix.a_thinking }}
+      AGENT_SOLVER_B_THINKING: "0"
+      AGENT_CHOOSER_THINKING: "0"
+      AGENT_SOLVER_TOKENS: ${{ matrix.solver_tokens }}
+      AGENT_CHOOSER_TOKENS: "2048"
+      AGENT_SOLVER_A_TEMPERATURE: "0.15"
+      AGENT_SOLVER_B_TEMPERATURE: "0.35"
+      AGENT_CHOOSER_TEMPERATURE: "0.0"
+      LOCAL_MAX_CONCURRENCY: "2"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Unit tests
+        run: pytest -q
+      - name: Verify API key
+        run: test -n "$INTERN_API_KEY"
+      - name: Import frozen Fresh-Holdout-v1 dev split
+        run: |
+          git fetch origin benchmark-fresh-holdout-v1 --depth=1
+          mkdir -p data/fresh_holdout_dev
+          git show FETCH_HEAD:data/fresh_holdout_v1/input.jsonl > /tmp/fresh_input.jsonl
+          git show FETCH_HEAD:data/fresh_holdout_v1/gold.jsonl > /tmp/fresh_gold.jsonl
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for src, dst in [('/tmp/fresh_input.jsonl','data/fresh_holdout_dev/input.jsonl'),('/tmp/fresh_gold.jsonl','data/fresh_holdout_dev/gold.jsonl')]:
+              rows=[json.loads(x) for x in Path(src).read_text(encoding='utf-8').splitlines() if x.strip()]
+              rows=[r for r in rows if int(r['idx']) < 22]
+              Path(dst).write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in rows),encoding='utf-8')
+              print(dst, len(rows))
+          PY
+      - name: Run ${{ matrix.name }}
+        run: |
+          rm -rf outputs/fresh_holdout/${{ matrix.name }}
+          python main.py \
+            --input_file data/fresh_holdout_dev/input.jsonl \
+            --output_dir outputs/fresh_holdout/${{ matrix.name }}
+      - name: Strict objective evaluation
+        if: always()
+        run: |
+          python scripts/evaluate_outputs.py \
+            --benchmark data/fresh_holdout_dev/gold.jsonl \
+            --output_dir outputs/fresh_holdout/${{ matrix.name }} \
+            --report_dir reports/fresh_holdout/${{ matrix.name }} || true
+      - name: Trace summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out=Path('outputs/fresh_holdout/${{ matrix.name }}')
+          s={'records':0,'success':0,'error':0,'final_marker':0,'agreement':0,'chooser':0,'solver_a_final':0,'solver_b_final':0}
+          for p in out.glob('*.json'):
+              r=json.loads(p.read_text(encoding='utf-8')); s['records']+=1
+              if r.get('status')=='success':
+                  s['success']+=1
+                  if 'FINAL_ANSWER:' in r.get('final_response','').upper(): s['final_marker']+=1
+                  for tr in r.get('trace',[]):
+                      step=tr.get('step'); c=tr.get('content',{})
+                      if step=='agreement_gate': s['agreement']+=1
+                      elif step=='chooser': s['chooser']+=1
+                      elif step=='solver_a' and c.get('has_final_marker'): s['solver_a_final']+=1
+                      elif step=='solver_b' and c.get('has_final_marker'): s['solver_b_final']+=1
+              else: s['error']+=1
+          print(json.dumps(s,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fresh-holdout-${{ matrix.name }}-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            outputs/fresh_holdout/${{ matrix.name }}
+            reports/fresh_holdout/${{ matrix.name }}
