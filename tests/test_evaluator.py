@@ -16,6 +16,10 @@ class EvaluatorTest(unittest.TestCase):
         s = score_answer(r"FINAL_ANSWER: \frac{\pi}{6}", str(math.pi / 6), "float")
         self.assertTrue(s.correct)
 
+    def test_latex_unbraced_fraction_numeric(self):
+        s = score_answer(r"FINAL_ANSWER: \frac13", "1/3", "rational")
+        self.assertTrue(s.correct)
+
     def test_nested_boxed_extraction(self):
         text = r"work $$\boxed{u(x,t)=\frac{1}{1+e^{x-t}}}$$"
         self.assertEqual(extract_final_answer(text), r"u(x,t)=\frac{1}{1+e^{x-t}}")
@@ -27,6 +31,16 @@ class EvaluatorTest(unittest.TestCase):
     def test_symbolic_equivalence(self):
         s = score_answer("FINAL_ANSWER: (x+1)^2", "x^2+2*x+1", "symbolic")
         if s.correct is not None:  # sympy may be absent in a bare environment
+            self.assertTrue(s.correct)
+
+    def test_symbolic_latex_imaginary_unit(self):
+        s = score_answer(r"FINAL_ANSWER: -\pi i", "-I*pi", "symbolic")
+        if s.correct is not None:
+            self.assertTrue(s.correct)
+
+    def test_symbolic_latex_log(self):
+        s = score_answer(r"FINAL_ANSWER: \ln 4-\frac54", "-5/4 + log(4)", "symbolic")
+        if s.correct is not None:
             self.assertTrue(s.correct)
 
     def test_symbolic_latex_containment(self):
