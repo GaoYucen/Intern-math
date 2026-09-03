@@ -26,7 +26,7 @@ jobs:
         run: python scripts/build_fresh_holdout_v1.py
       - name: Commit frozen benchmark files
         run: |
-          if git diff --quiet -- data/fresh_holdout_v1; then
+          if [ -z "$(git status --porcelain -- data/fresh_holdout_v1)" ]; then
             echo "Fresh holdout already up to date."
             exit 0
           fi
