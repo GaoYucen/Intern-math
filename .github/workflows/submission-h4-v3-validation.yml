@@ -1,0 +1,136 @@
+name: submission-h4-v3-validation
+
+on:
+  push:
+    branches: [submission-h4-hybrid-v3]
+    paths:
+      - "user_agent.py"
+      - "main.py"
+      - "tests/**"
+      - ".github/workflows/submission-h4-v3-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview-397b
+      LOCAL_MAX_CONCURRENCY: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Assert frozen submission defaults
+        run: |
+          env -u AGENT_MODE \
+              -u AGENT_SOLVER_A_THINKING \
+              -u AGENT_SOLVER_B_THINKING \
+              -u AGENT_CHOOSER_THINKING \
+              -u AGENT_SOLVER_TOKENS \
+              -u AGENT_CHOOSER_TOKENS \
+              -u AGENT_FINALIZER_TOKENS \
+              -u AGENT_SOLVER_A_TEMPERATURE \
+              -u AGENT_SOLVER_B_TEMPERATURE \
+              -u AGENT_CHOOSER_TEMPERATURE \
+              -u AGENT_FINALIZER_TEMPERATURE \
+              python - <<'PY'
+          from user_agent import AgentConfig, ReasoningAgent
+
+          cfg = AgentConfig.from_env()
+          assert cfg.mode == 'hybrid', cfg
+          assert cfg.solver_a_thinking is True, cfg
+          assert cfg.solver_tokens == 4096, cfg
+          assert cfg.finalizer_tokens == 1536, cfg
+          assert cfg.solver_a_temperature == 0.15, cfg
+          assert cfg.finalizer_temperature == 0.0, cfg
+
+          class FakeClient:
+              def __init__(self, responses):
+                  self.responses = list(responses)
+                  self.calls = []
+              def chat(self, messages, **kwargs):
+                  self.calls.append(kwargs)
+                  return self.responses.pop(0)
+
+          closed = FakeClient(['work\nFINAL_ANSWER: 42'])
+          out = ReasoningAgent(closed).solve('6*7?', {'idx': 0})
+          assert len(closed.calls) == 1
+          assert closed.calls[0]['thinking_mode'] is True
+          assert closed.calls[0]['max_tokens'] == 4096
+          assert out['final_response'].endswith('FINAL_ANSWER: 42')
+
+          rescued = FakeClient([
+              'The derivation reaches 42 but runs out before the final line.',
+              'FINAL_ANSWER: 42',
+          ])
+          out = ReasoningAgent(rescued).solve('6*7?', {'idx': 1})
+          assert len(rescued.calls) == 2
+          assert rescued.calls[0]['thinking_mode'] is True
+          assert rescued.calls[0]['max_tokens'] == 4096
+          assert rescued.calls[1]['thinking_mode'] is False
+          assert rescued.calls[1]['max_tokens'] == 1536
+          assert out['final_response'].endswith('FINAL_ANSWER: 42')
+          print('submission defaults and hybrid gate: OK')
+          PY
+
+      - name: Verify API key
+        run: test -n "$INTERN_API_KEY"
+
+      - name: Build one-item official-style smoke input
+        run: |
+          mkdir -p tmp
+          cat > tmp/submission_smoke.jsonl <<'EOF'
+          {"idx": 0, "problem": "Compute the exact value of 6 times 7. Give a concise justification and the final answer.", "domain": "arithmetic", "answer_type": "integer"}
+          EOF
+
+      - name: Run one-item 397B smoke with submission defaults
+        run: |
+          rm -rf outputs/submission_h4_v3_smoke
+          env -u AGENT_MODE \
+              -u AGENT_SOLVER_A_THINKING \
+              -u AGENT_SOLVER_B_THINKING \
+              -u AGENT_CHOOSER_THINKING \
+              -u AGENT_SOLVER_TOKENS \
+              -u AGENT_CHOOSER_TOKENS \
+              -u AGENT_FINALIZER_TOKENS \
+              python main.py \
+                --input_file tmp/submission_smoke.jsonl \
+                --output_dir outputs/submission_h4_v3_smoke
+
+      - name: Validate smoke output contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          files = list(Path('outputs/submission_h4_v3_smoke').glob('*.json'))
+          assert len(files) == 1, files
+          row = json.loads(files[0].read_text(encoding='utf-8'))
+          assert row.get('status') == 'success', row
+          text = row.get('final_response', '')
+          assert isinstance(text, str) and text.strip(), row
+          assert 'FINAL_ANSWER:' in text.upper(), text
+          print('official-style smoke output contract: OK')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: submission-h4-v3-validation-${{ github.run_id }}
+          retention-days: 30
+          path: outputs/submission_h4_v3_smoke
