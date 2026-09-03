@@ -78,12 +78,25 @@ class AgentTest(unittest.TestCase):
         self.assertEqual(out["final_response"], "deep proof\nFINAL_ANSWER: 42")
         self.assertEqual(out["trace"][-1]["content"]["status"], "primary_closed")
 
-    def test_hybrid_treats_boxed_primary_as_closed(self):
+    def test_hybrid_normalizes_terminal_boxed_primary(self):
         client = FakeClient([r"derivation ends with \boxed{42}"])
         cfg = AgentConfig(mode="hybrid", solver_a_thinking=True)
         out = ReasoningAgent(client, cfg).solve("6*7?", {"idx": 7})
         self.assertEqual(len(client.calls), 1)
         self.assertIn(r"\boxed{42}", out["final_response"])
+        self.assertTrue(out["final_response"].endswith("FINAL_ANSWER: 42"))
+        self.assertEqual(out["trace"][-1]["step"], "delivery_normalization")
+
+    def test_nonterminal_box_does_not_skip_finalizer(self):
+        client = FakeClient([
+            r"We obtain \boxed{6}. Now we still must multiply by 7.",
+            "The remaining local step gives 42.\nFINAL_ANSWER: 42",
+        ])
+        cfg = AgentConfig(mode="hybrid", solver_a_thinking=True)
+        out = ReasoningAgent(client, cfg).solve("6*7?", {"idx": 70})
+        self.assertEqual(len(client.calls), 2)
+        self.assertTrue(out["final_response"].endswith("FINAL_ANSWER: 42"))
+        self.assertEqual(out["trace"][-1]["content"]["status"], "finalizer_closed")
 
     def test_hybrid_finalizes_unclosed_primary(self):
         client = FakeClient([
@@ -103,6 +116,17 @@ class AgentTest(unittest.TestCase):
         self.assertEqual(client.calls[1][1]["max_tokens"], 1536)
         self.assertIn("FINAL_ANSWER: 42", out["final_response"])
         self.assertEqual(out["trace"][-1]["content"]["status"], "finalizer_closed")
+
+    def test_hybrid_normalizes_terminal_boxed_finalizer(self):
+        client = FakeClient([
+            "We reached the last step but did not state it.",
+            r"Completing that step gives \boxed{42}.",
+        ])
+        cfg = AgentConfig(mode="hybrid", solver_a_thinking=True)
+        out = ReasoningAgent(client, cfg).solve("6*7?", {"idx": 80})
+        self.assertEqual(len(client.calls), 2)
+        self.assertTrue(out["final_response"].endswith("FINAL_ANSWER: 42"))
+        self.assertEqual(out["trace"][-1]["step"], "delivery_normalization")
 
     def test_hybrid_failed_finalizer_does_not_destroy_primary(self):
         primary = "long useful derivation ending before the final marker"
