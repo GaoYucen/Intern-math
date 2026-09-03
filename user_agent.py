@@ -26,6 +26,18 @@ Output rules:
 4. Do not spend the end of the budget exploring; reserve enough budget to state the final answer.
 """
 
+FINALIZER_PROMPT = """You are a bounded mathematical finalizer. A stronger deep-reasoning solver has already worked on the problem, but its response may have ended before delivering a clean answer.
+
+Your job is NOT to restart the problem from scratch and NOT to explore many new approaches. Treat the supplied solver work as primary evidence. Recover its best supported conclusion, complete only the minimum missing local steps, check that the requested object/conditions are satisfied, and produce a concise deliverable answer.
+
+Rules:
+1. Preserve a sound conclusion already present in the solver work; do not change it merely to be different.
+2. If the solver work contains an arithmetic/sign inconsistency that can be corrected locally, correct it.
+3. If evidence is incomplete, make the best justified completion from that evidence rather than opening a long new search.
+4. For proof/derivation questions, give a short sufficient completion. For objective questions, keep the finalization very concise.
+5. Always end with exactly one line beginning `FINAL_ANSWER:` followed by the requested answer or conclusion.
+"""
+
 CHOOSER_PROMPT = """You are a mathematical adjudicator. Two independent solvers attempted the same problem.
 
 Determine which candidate is more likely correct. Do not rewrite both solutions and do not start a long new derivation. Check only the decisive mathematical issue: whether the candidate actually answers the question, whether equations/conditions are satisfied, and whether there is a concrete contradiction or computational error.
@@ -45,17 +57,19 @@ def _env_bool(name: str, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class AgentConfig:
-    """Bounded multi-path configuration for hidden-set evaluation."""
+    """Bounded inference configuration for hidden-set evaluation."""
 
-    mode: str = "dual"  # dual | direct_a
+    mode: str = "dual"  # dual | direct_a | hybrid
     solver_a_thinking: bool = False
     solver_b_thinking: bool = False
     chooser_thinking: bool = False
     solver_tokens: int = 4096
     chooser_tokens: int = 2048
+    finalizer_tokens: int = 1536
     solver_a_temperature: float = 0.15
     solver_b_temperature: float = 0.35
     chooser_temperature: float = 0.0
+    finalizer_temperature: float = 0.0
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -66,14 +80,16 @@ class AgentConfig:
             chooser_thinking=_env_bool("AGENT_CHOOSER_THINKING", False),
             solver_tokens=int(os.environ.get("AGENT_SOLVER_TOKENS", "4096")),
             chooser_tokens=int(os.environ.get("AGENT_CHOOSER_TOKENS", "2048")),
+            finalizer_tokens=int(os.environ.get("AGENT_FINALIZER_TOKENS", "1536")),
             solver_a_temperature=float(os.environ.get("AGENT_SOLVER_A_TEMPERATURE", "0.15")),
             solver_b_temperature=float(os.environ.get("AGENT_SOLVER_B_TEMPERATURE", "0.35")),
             chooser_temperature=float(os.environ.get("AGENT_CHOOSER_TEMPERATURE", "0.0")),
+            finalizer_temperature=float(os.environ.get("AGENT_FINALIZER_TEMPERATURE", "0.0")),
         )
 
 
 class ReasoningAgent:
-    """Competition-compatible bounded dual-solver agent.
+    """Competition-compatible bounded reasoning agent.
 
     The platform injects the official client and chooses the actual model at
     submission time. This code intentionally never tries to override `model`.
@@ -83,7 +99,7 @@ class ReasoningAgent:
         del args, kwargs
         self.client = client
         self.config = config or AgentConfig.from_env()
-        if self.config.mode not in {"dual", "direct_a"}:
+        if self.config.mode not in {"dual", "direct_a", "hybrid"}:
             raise ValueError(f"Unsupported AGENT_MODE={self.config.mode!r}")
 
     def solve(self, problem: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -101,6 +117,39 @@ class ReasoningAgent:
 
         if self.config.mode == "direct_a":
             return {"final_response": a or "FINAL_ANSWER: C", "trace": trace}
+
+        if self.config.mode == "hybrid":
+            # Destructive-rate guard: if the strong primary already delivered a
+            # closed answer (explicit final marker or balanced boxed result), do
+            # not touch it with another model call.
+            if self._has_closed_answer(a):
+                trace.append({"step": "closure_gate", "content": {"status": "primary_closed"}})
+                return {"final_response": a, "trace": trace}
+
+            finalizer_input = (
+                f"PROBLEM:\n{problem}\n\n"
+                "DEEP SOLVER WORK (may be incomplete or truncated):\n"
+                f"{self._bounded_candidate(a, max_chars=28000) if a else '[no usable primary response]'}\n\n"
+                "Finalize this work without restarting a broad search."
+            )
+            finalized = self._safe_call(
+                FINALIZER_PROMPT,
+                finalizer_input,
+                temperature=self.config.finalizer_temperature,
+                max_tokens=self.config.finalizer_tokens,
+                thinking_mode=False,
+            )
+            trace.append(self._trace_entry("finalizer", finalized, False))
+
+            if self._has_closed_answer(finalized):
+                trace.append({"step": "closure_gate", "content": {"status": "finalizer_closed"}})
+                return {"final_response": finalized, "trace": trace}
+
+            # A failed finalizer must never destroy non-empty primary evidence.
+            trace.append({"step": "closure_gate", "content": {"status": "finalizer_failed"}})
+            if a:
+                return {"final_response": a, "trace": trace}
+            return {"final_response": finalized or "FINAL_ANSWER: C", "trace": trace}
 
         b = self._safe_call(
             SOLVER_B_PROMPT,
@@ -201,6 +250,32 @@ class ReasoningAgent:
         return matches[-1].strip()
 
     @staticmethod
+    def _extract_last_boxed(text: str) -> Optional[str]:
+        text = text or ""
+        needle = "\\boxed{"
+        start = text.rfind(needle)
+        if start < 0:
+            return None
+        i = start + len(needle)
+        depth = 1
+        body_start = i
+        while i < len(text):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[body_start:i].strip()
+            i += 1
+        return None
+
+    @classmethod
+    def _has_closed_answer(cls, text: str) -> bool:
+        return bool(text) and (
+            cls._extract_final_answer(text) is not None or cls._extract_last_boxed(text) is not None
+        )
+
+    @staticmethod
     def _normalize_answer(answer: str) -> str:
         value = answer.strip().lower()
         value = value.replace("$", "")
@@ -232,16 +307,17 @@ class ReasoningAgent:
         # Keep both the beginning (setup) and end (latest conclusion).
         head = max_chars // 3
         tail = max_chars - head
-        return text[:head] + "\n...[middle omitted for bounded adjudication]...\n" + text[-tail:]
+        return text[:head] + "\n...[middle omitted for bounded finalization/adjudication]...\n" + text[-tail:]
 
-    @staticmethod
-    def _trace_entry(step: str, text: str, thinking: bool) -> Dict[str, Any]:
+    @classmethod
+    def _trace_entry(cls, step: str, text: str, thinking: bool) -> Dict[str, Any]:
         return {
             "step": step,
             "content": {
                 "status": "completed" if text else "error",
                 "response_chars": len(text or ""),
                 "has_final_marker": "FINAL_ANSWER:" in (text or "").upper(),
+                "has_closed_answer": cls._has_closed_answer(text),
                 "thinking_mode": thinking,
             },
         }
