@@ -102,14 +102,12 @@ def _strip_latex_display(value: str) -> str:
 
 def _replace_simple_frac(s: str) -> str:
     """Handle common TeX fractions, including shorthand such as ``\\frac13``."""
-    # Braced numerator and denominator. Repeat to support simple nesting.
     pattern = re.compile(r"\\(?:d?frac)\{([^{}]+)\}\{([^{}]+)\}")
     previous = None
     while previous != s:
         previous = s
         s = pattern.sub(r"((\1)/(\2))", s)
 
-    # TeX permits one-token arguments without braces: \frac13, \frac1{3}, \frac{1}3.
     token = r"(?:\\pi|[A-Za-z0-9])"
     s = re.sub(rf"\\(?:d?frac)\{{([^{{}}]+)\}}({token})", r"((\1)/(\2))", s)
     s = re.sub(rf"\\(?:d?frac)({token})\{{([^{{}}]+)\}}", r"((\1)/(\2))", s)
@@ -122,7 +120,6 @@ def _latex_to_sympyish(value: str) -> str:
     s = _replace_simple_frac(s)
     s = re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", s)
 
-    # Common constants/functions seen in model finals.
     s = s.replace("\\mathrm{i}", "I").replace("\\mathbf{i}", "I")
     s = s.replace("\\mathrm{e}", "E")
     s = s.replace("\\pi", "pi").replace("π", "pi")
@@ -132,7 +129,9 @@ def _latex_to_sympyish(value: str) -> str:
     s = re.sub(r"log([0-9.]+)", r"log(\1)", s)
 
     s = s.replace("\\cdot", "*").replace("\\times", "*")
-    # Preserve the very common mathematical imaginary-unit convention.
+    # Standalone mathematical i is the imaginary unit. Do this before
+    # whitespace removal so ``pi i`` cannot collapse into the symbol ``pii``.
+    s = re.sub(r"(?<![A-Za-z])i(?![A-Za-z])", "I", s)
     s = re.sub(r"(?<=pi)\s+(?=I\b)", "*", s)
     s = re.sub(r"(?<=\d)\s+(?=I\b)", "*", s)
     s = re.sub(r"(?<=I)\s+(?=pi\b|\d)", "*", s)
@@ -178,8 +177,6 @@ def _split_set(value: str) -> list[str]:
 
 
 def _symbolically_equal(a: str, b: str) -> Optional[bool]:
-    # Exact/containment comparison in normalized LaTeX first. This covers
-    # expressions such as \mathbb{R}P^k that are meaningful but not SymPy syntax.
     na = _latex_normal_form(a)
     nb = _latex_normal_form(b)
     if na == nb:
