@@ -73,9 +73,13 @@ class AgentConfig:
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
+        # Submission defaults are intentionally frozen to the validated H4
+        # route: 397B model is selected by the platform; the agent uses a
+        # thinking-on 4K primary and invokes a short thinking-off finalizer only
+        # when the primary has not closed.
         return cls(
-            mode=os.environ.get("AGENT_MODE", "dual").strip().lower(),
-            solver_a_thinking=_env_bool("AGENT_SOLVER_A_THINKING", False),
+            mode=os.environ.get("AGENT_MODE", "hybrid").strip().lower(),
+            solver_a_thinking=_env_bool("AGENT_SOLVER_A_THINKING", True),
             solver_b_thinking=_env_bool("AGENT_SOLVER_B_THINKING", False),
             chooser_thinking=_env_bool("AGENT_CHOOSER_THINKING", False),
             solver_tokens=int(os.environ.get("AGENT_SOLVER_TOKENS", "4096")),
