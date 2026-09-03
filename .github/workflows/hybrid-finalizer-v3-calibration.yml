@@ -1,5 +1,6 @@
 name: hybrid-finalizer-v3-calibration
 
+# H4/H6 bounded-thinking + non-destructive finalizer ablation.
 on:
   push:
     branches: [hybrid-finalizer-v3]
