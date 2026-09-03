@@ -1,0 +1,99 @@
+{
+  "answer_type_counts": {
+    "boolean": 1,
+    "integer": 16,
+    "rational": 6,
+    "symbolic": 7
+  },
+  "construction_policy": {
+    "freeze_policy": "do not edit observed items in place; create a new version",
+    "freshness": "styles informed by public 2025-2026 exams; all benchmark statements independently constructed or parameterized",
+    "gold_policy": "objective gold only in v0.1; answers deterministically recomputed by this builder",
+    "never_touch_policy": "indices 22-29 are one-shot pre-submission checks and must not be used for prompt tuning",
+    "no_verbatim_copy": true,
+    "purpose": "architecture selection under distribution shift; not a leaderboard predictor"
+  },
+  "created_utc": "2026-09-03",
+  "dev_indices": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21
+  ],
+  "domain_counts": {
+    "abstract_algebra": 4,
+    "combinatorics": 3,
+    "complex_analysis": 1,
+    "discrete_math": 1,
+    "functional_analysis": 1,
+    "geometry": 1,
+    "graph_theory": 1,
+    "linear_algebra": 2,
+    "number_theory": 3,
+    "ode": 2,
+    "optimization": 1,
+    "pde": 1,
+    "probability": 5,
+    "real_analysis": 3,
+    "topology": 1
+  },
+  "gold_sha256": "5e56880720aa5204f55d74f3a948046dccd0facd1f06dd8f86b472269490d73c",
+  "input_sha256": "0231533e2013c7ff3dc7e973795382b6ca44160fb5a149695e5c6b569fbb120e",
+  "n_items": 30,
+  "name": "Fresh-Holdout-v1",
+  "never_touch_indices": [
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29
+  ],
+  "public_inspiration_sources": [
+    {
+      "name": "Harvard Mathematics Qualifying Examination, Fall 2025",
+      "url": "https://www.math.harvard.edu/wp-content/uploads/Quals-Fall-2025-final.pdf"
+    },
+    {
+      "name": "NUS Algebra Qualifying Exam, January 2025",
+      "url": "https://www.math.nus.edu.sg/wp-content/uploads/sites/4/2025/01/S2-2024-Algebra.pdf"
+    },
+    {
+      "name": "University of Toronto Past Comprehensive Exams",
+      "url": "https://www.mathematics.utoronto.ca/graduate/past-comprehensive-exams"
+    },
+    {
+      "name": "University of Arizona Qualifying Exams",
+      "url": "https://www.math.arizona.edu/academics/graduate/requirements/qualifying-exams"
+    },
+    {
+      "name": "MAA Putnam Archive (2025)",
+      "url": "https://maa.org/maa-putnam-archive/"
+    }
+  ],
+  "split_counts": {
+    "dev": 22,
+    "holdout": 8
+  },
+  "version": "0.1"
+}
