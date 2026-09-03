@@ -70,6 +70,49 @@ class AgentTest(unittest.TestCase):
         self.assertEqual(len(client.calls), 1)
         self.assertEqual(out["final_response"], "FINAL_ANSWER: 42")
 
+    def test_hybrid_preserves_closed_primary_without_finalizer(self):
+        client = FakeClient(["deep proof\nFINAL_ANSWER: 42"])
+        cfg = AgentConfig(mode="hybrid", solver_a_thinking=True, solver_tokens=6144)
+        out = ReasoningAgent(client, cfg).solve("6*7?", {"idx": 6})
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(out["final_response"], "deep proof\nFINAL_ANSWER: 42")
+        self.assertEqual(out["trace"][-1]["content"]["status"], "primary_closed")
+
+    def test_hybrid_treats_boxed_primary_as_closed(self):
+        client = FakeClient([r"derivation ends with \boxed{42}"])
+        cfg = AgentConfig(mode="hybrid", solver_a_thinking=True)
+        out = ReasoningAgent(client, cfg).solve("6*7?", {"idx": 7})
+        self.assertEqual(len(client.calls), 1)
+        self.assertIn(r"\boxed{42}", out["final_response"])
+
+    def test_hybrid_finalizes_unclosed_primary(self):
+        client = FakeClient([
+            "We reduce the expression and obtain 42 but need to state it cleanly",
+            "The prior derivation supports 42.\nFINAL_ANSWER: 42",
+        ])
+        cfg = AgentConfig(
+            mode="hybrid",
+            solver_a_thinking=True,
+            solver_tokens=4096,
+            finalizer_tokens=1536,
+        )
+        out = ReasoningAgent(client, cfg).solve("6*7?", {"idx": 8})
+        self.assertEqual(len(client.calls), 2)
+        self.assertTrue(client.calls[0][1]["thinking_mode"])
+        self.assertFalse(client.calls[1][1]["thinking_mode"])
+        self.assertEqual(client.calls[1][1]["max_tokens"], 1536)
+        self.assertIn("FINAL_ANSWER: 42", out["final_response"])
+        self.assertEqual(out["trace"][-1]["content"]["status"], "finalizer_closed")
+
+    def test_hybrid_failed_finalizer_does_not_destroy_primary(self):
+        primary = "long useful derivation ending before the final marker"
+        client = FakeClient([primary, RuntimeError("timeout")])
+        cfg = AgentConfig(mode="hybrid", solver_a_thinking=True)
+        out = ReasoningAgent(client, cfg).solve("hard problem", {"idx": 9})
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(out["final_response"], primary)
+        self.assertEqual(out["trace"][-1]["content"]["status"], "finalizer_failed")
+
     def test_normalization_handles_boxed_and_spaces(self):
         self.assertEqual(
             ReasoningAgent._normalize_answer(" $\\boxed{42}$ "),
