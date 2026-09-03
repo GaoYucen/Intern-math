@@ -1,0 +1,140 @@
+name: hybrid-finalizer-v3-stress
+
+on:
+  push:
+    branches: [hybrid-finalizer-v3]
+    paths:
+      - ".github/workflows/hybrid-finalizer-v3-stress.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stress40:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview-397b
+      AGENT_MODE: hybrid
+      AGENT_SOLVER_A_THINKING: "1"
+      AGENT_SOLVER_B_THINKING: "0"
+      AGENT_CHOOSER_THINKING: "0"
+      AGENT_SOLVER_TOKENS: "4096"
+      AGENT_CHOOSER_TOKENS: "2048"
+      AGENT_FINALIZER_TOKENS: "1536"
+      AGENT_SOLVER_A_TEMPERATURE: "0.15"
+      AGENT_SOLVER_B_TEMPERATURE: "0.35"
+      AGENT_CHOOSER_TEMPERATURE: "0.0"
+      AGENT_FINALIZER_TEMPERATURE: "0.0"
+      LOCAL_MAX_CONCURRENCY: "3"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Verify API key
+        run: test -n "$INTERN_API_KEY"
+
+      - name: Build trusted stress40
+        run: python scripts/build_long_reasoning_stress.py
+
+      - name: Run H4 hybrid
+        run: |
+          rm -rf outputs/hybrid_v3/stress40_h4
+          python main.py \
+            --input_file data/long_reasoning_stress/input.jsonl \
+            --output_dir outputs/hybrid_v3/stress40_h4
+
+      - name: Strict evaluation
+        if: always()
+        run: |
+          python scripts/evaluate_outputs.py \
+            --benchmark data/long_reasoning_stress/gold.jsonl \
+            --output_dir outputs/hybrid_v3/stress40_h4 \
+            --report_dir reports/hybrid_v3/stress40_h4 || true
+
+      - name: Reference-based adjudication
+        if: always()
+        run: |
+          python scripts/adjudicate_results.py \
+            --benchmark data/long_reasoning_stress/gold.jsonl \
+            --output_dir outputs/hybrid_v3/stress40_h4 \
+            --report_dir reports/hybrid_v3/stress40_h4/adjudicated \
+            --judge-model intern-s1-pro \
+            --fallback-model intern-s2-preview \
+            --concurrency 2 || true
+
+      - name: Closure and delivery summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          out = Path('outputs/hybrid_v3/stress40_h4')
+          summary = {
+              'records': 0, 'success': 0, 'error': 0,
+              'explicit_final': 0,
+              'primary_closed': 0, 'primary_unclosed': 0,
+              'finalizer_called': 0, 'finalizer_closed': 0, 'finalizer_failed': 0,
+              'delivery_normalized': 0,
+          }
+          lengths = []
+          for p in sorted(out.glob('*.json')):
+              row = json.loads(p.read_text(encoding='utf-8'))
+              summary['records'] += 1
+              if row.get('status') != 'success':
+                  summary['error'] += 1
+                  continue
+              summary['success'] += 1
+              text = row.get('final_response', '')
+              lengths.append(len(text))
+              if 'FINAL_ANSWER:' in text.upper():
+                  summary['explicit_final'] += 1
+              trace = row.get('trace', [])
+              solver = next((t for t in trace if t.get('step') == 'solver_a'), None)
+              if solver:
+                  if solver.get('content', {}).get('has_closed_answer'):
+                      summary['primary_closed'] += 1
+                  else:
+                      summary['primary_unclosed'] += 1
+              if any(t.get('step') == 'finalizer' for t in trace):
+                  summary['finalizer_called'] += 1
+              for t in trace:
+                  if t.get('step') == 'closure_gate':
+                      status = t.get('content', {}).get('status')
+                      if status == 'finalizer_closed':
+                          summary['finalizer_closed'] += 1
+                      elif status == 'finalizer_failed':
+                          summary['finalizer_failed'] += 1
+                  elif t.get('step') == 'delivery_normalization':
+                      summary['delivery_normalized'] += 1
+          summary['mean_final_chars'] = sum(lengths) / len(lengths) if lengths else 0
+          summary['max_final_chars'] = max(lengths) if lengths else 0
+          path = Path('reports/hybrid_v3/stress40_h4/closure_summary.json')
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
+          print(json.dumps(summary, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hybrid-v3-stress40-h4-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            data/long_reasoning_stress/manifest.json
+            outputs/hybrid_v3/stress40_h4
+            reports/hybrid_v3/stress40_h4
