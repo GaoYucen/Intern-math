@@ -96,6 +96,7 @@ def _strip_latex_display(value: str) -> str:
     if boxed:
         s = boxed
     s = s.replace("$$", "").replace("\\[", "").replace("\\]", "")
+    s = s.replace("\\(", "").replace("\\)", "")
     s = s.replace("\\left", "").replace("\\right", "")
     return s.strip().strip("$")
 
@@ -117,6 +118,14 @@ def _replace_simple_frac(s: str) -> str:
 
 def _latex_to_sympyish(value: str) -> str:
     s = _strip_latex_display(value)
+
+    # TeX spacing commands frequently appear inside otherwise objective finals,
+    # e.g. 1\,058\,787. They carry no mathematical meaning for our evaluator.
+    for token in (r"\,", r"\!", r"\:", r"\;", r"\quad", r"\qquad"):
+        s = s.replace(token, "")
+    # Conventional thousands separators in a numeric final.
+    s = re.sub(r"(?<=\d)[,，](?=\d{3}(?:\D|$))", "", s)
+
     s = _replace_simple_frac(s)
     s = re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", s)
 
@@ -124,6 +133,7 @@ def _latex_to_sympyish(value: str) -> str:
     s = s.replace("\\mathrm{e}", "E")
     s = s.replace("\\pi", "pi").replace("π", "pi")
     s = s.replace("\\ln", "log")
+    s = re.sub(r"(?<![A-Za-z])ln(?=\s*[({0-9A-Za-z])", "log", s)
     s = re.sub(r"log\s*\{([^{}]+)\}", r"log(\1)", s)
     s = re.sub(r"log\s+([A-Za-z0-9.]+)", r"log(\1)", s)
     s = re.sub(r"log([0-9.]+)", r"log(\1)", s)
@@ -139,6 +149,12 @@ def _latex_to_sympyish(value: str) -> str:
     s = s.replace("^", "**")
     s = s.replace("{", "(").replace("}", ")")
     s = re.sub(r"\s+", "", s)
+
+    # SymPy's basic sympify does not enable implicit multiplication. Add the
+    # common cases produced by LaTeX conversion, such as 25pi and 2log(2).
+    s = re.sub(r"(?<=\d)(?=(?:pi|I|E|sqrt\(|log\())", "*", s)
+    s = re.sub(r"(?<=\))(?=(?:pi|I|E|sqrt\(|log\())", "*", s)
+    s = re.sub(r"(?<=pi)(?=I\b)", "*", s)
     return s
 
 
