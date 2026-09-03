@@ -101,12 +101,19 @@ def _strip_latex_display(value: str) -> str:
 
 
 def _replace_simple_frac(s: str) -> str:
-    # Repeatedly handles common non-nested fractions such as \frac{\pi}{6}.
+    """Handle common TeX fractions, including shorthand such as ``\\frac13``."""
+    # Braced numerator and denominator. Repeat to support simple nesting.
     pattern = re.compile(r"\\(?:d?frac)\{([^{}]+)\}\{([^{}]+)\}")
     previous = None
     while previous != s:
         previous = s
         s = pattern.sub(r"((\1)/(\2))", s)
+
+    # TeX permits one-token arguments without braces: \frac13, \frac1{3}, \frac{1}3.
+    token = r"(?:\\pi|[A-Za-z0-9])"
+    s = re.sub(rf"\\(?:d?frac)\{{([^{{}}]+)\}}({token})", r"((\1)/(\2))", s)
+    s = re.sub(rf"\\(?:d?frac)({token})\{{([^{{}}]+)\}}", r"((\1)/(\2))", s)
+    s = re.sub(rf"\\(?:d?frac)({token})({token})", r"((\1)/(\2))", s)
     return s
 
 
@@ -114,8 +121,22 @@ def _latex_to_sympyish(value: str) -> str:
     s = _strip_latex_display(value)
     s = _replace_simple_frac(s)
     s = re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", s)
+
+    # Common constants/functions seen in model finals.
+    s = s.replace("\\mathrm{i}", "I").replace("\\mathbf{i}", "I")
+    s = s.replace("\\mathrm{e}", "E")
     s = s.replace("\\pi", "pi").replace("π", "pi")
+    s = s.replace("\\ln", "log")
+    s = re.sub(r"log\s*\{([^{}]+)\}", r"log(\1)", s)
+    s = re.sub(r"log\s+([A-Za-z0-9.]+)", r"log(\1)", s)
+    s = re.sub(r"log([0-9.]+)", r"log(\1)", s)
+
     s = s.replace("\\cdot", "*").replace("\\times", "*")
+    # Preserve the very common mathematical imaginary-unit convention.
+    s = re.sub(r"(?<=pi)\s+(?=I\b)", "*", s)
+    s = re.sub(r"(?<=\d)\s+(?=I\b)", "*", s)
+    s = re.sub(r"(?<=I)\s+(?=pi\b|\d)", "*", s)
+
     s = s.replace("^", "**")
     s = s.replace("{", "(").replace("}", ")")
     s = re.sub(r"\s+", "", s)
@@ -134,7 +155,10 @@ def _to_float(value: str) -> Optional[float]:
     s = _latex_to_sympyish(value)
     if sp is not None:
         try:
-            expr = sp.sympify(s, locals={"pi": sp.pi, "sqrt": sp.sqrt})
+            expr = sp.sympify(
+                s,
+                locals={"pi": sp.pi, "sqrt": sp.sqrt, "I": sp.I, "E": sp.E, "log": sp.log},
+            )
             if expr.is_real is False:
                 return None
             return float(sp.N(expr))
@@ -166,7 +190,15 @@ def _symbolically_equal(a: str, b: str) -> Optional[bool]:
     if sp is None:
         return None
     try:
-        local_dict = {"pi": sp.pi, "e": sp.E, "i": sp.I, "sqrt": sp.sqrt}
+        local_dict = {
+            "pi": sp.pi,
+            "e": sp.E,
+            "E": sp.E,
+            "i": sp.I,
+            "I": sp.I,
+            "sqrt": sp.sqrt,
+            "log": sp.log,
+        }
         ea = sp.sympify(_latex_to_sympyish(a), locals=local_dict)
         eb = sp.sympify(_latex_to_sympyish(b), locals=local_dict)
         return bool(sp.simplify(ea - eb) == 0)
