@@ -1,0 +1,138 @@
+name: h4-never-touch-v1
+
+on:
+  push:
+    branches: [hybrid-finalizer-v3]
+    paths:
+      - ".github/workflows/h4-never-touch-v1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  never-touch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview-397b
+      AGENT_MODE: hybrid
+      AGENT_SOLVER_A_THINKING: "1"
+      AGENT_SOLVER_B_THINKING: "0"
+      AGENT_CHOOSER_THINKING: "0"
+      AGENT_SOLVER_TOKENS: "4096"
+      AGENT_CHOOSER_TOKENS: "2048"
+      AGENT_FINALIZER_TOKENS: "1536"
+      AGENT_SOLVER_A_TEMPERATURE: "0.15"
+      AGENT_SOLVER_B_TEMPERATURE: "0.35"
+      AGENT_CHOOSER_TEMPERATURE: "0.0"
+      AGENT_FINALIZER_TEMPERATURE: "0.0"
+      LOCAL_MAX_CONCURRENCY: "2"
+      FROZEN_BENCHMARK_COMMIT: "77890f0b4fef908401dd3df11ec09885e67ce946"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Verify API key
+        run: test -n "$INTERN_API_KEY"
+
+      - name: Materialize frozen never-touch 8 without printing contents
+        run: |
+          git fetch origin "$FROZEN_BENCHMARK_COMMIT" --depth=1
+          mkdir -p data/fresh_holdout_never_touch_v1
+          git show "$FROZEN_BENCHMARK_COMMIT":data/fresh_holdout_v1/input.jsonl > /tmp/fresh_input.jsonl
+          git show "$FROZEN_BENCHMARK_COMMIT":data/fresh_holdout_v1/gold.jsonl > /tmp/fresh_gold.jsonl
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+
+          out = Path('data/fresh_holdout_never_touch_v1')
+          pairs = []
+          for in_path, gold_path in [('/tmp/fresh_input.jsonl','/tmp/fresh_gold.jsonl')]:
+              inputs=[json.loads(x) for x in Path(in_path).read_text(encoding='utf-8').splitlines() if x.strip()]
+              golds=[json.loads(x) for x in Path(gold_path).read_text(encoding='utf-8').splitlines() if x.strip()]
+              by_gold={int(r['idx']):r for r in golds}
+              selected=[r for r in inputs if 22 <= int(r['idx']) < 30]
+              if len(selected) != 8:
+                  raise SystemExit(f'Expected 8 frozen never-touch rows, got {len(selected)}')
+              out_inputs=[]; out_golds=[]
+              for local_idx, row in enumerate(sorted(selected, key=lambda r:int(r['idx']))):
+                  orig=int(row['idx'])
+                  g=dict(by_gold[orig]); rr=dict(row)
+                  rr['original_idx']=orig; g['original_idx']=orig
+                  rr['idx']=local_idx; g['idx']=local_idx
+                  out_inputs.append(rr); out_golds.append(g)
+              (out/'input.jsonl').write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in out_inputs),encoding='utf-8')
+              (out/'gold.jsonl').write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in out_golds),encoding='utf-8')
+          for name in ('input.jsonl','gold.jsonl'):
+              p=out/name
+              print(name, 'rows=8', 'sha256='+hashlib.sha256(p.read_bytes()).hexdigest())
+          print('benchmark_commit='+os.environ['FROZEN_BENCHMARK_COMMIT'])
+          PY
+
+      - name: Run H4 hybrid once on never-touch 8
+        run: |
+          rm -rf outputs/hybrid_v3/never_touch_h4
+          python main.py \
+            --input_file data/fresh_holdout_never_touch_v1/input.jsonl \
+            --output_dir outputs/hybrid_v3/never_touch_h4
+
+      - name: Strict deterministic evaluation
+        if: always()
+        run: |
+          python scripts/evaluate_outputs.py \
+            --benchmark data/fresh_holdout_never_touch_v1/gold.jsonl \
+            --output_dir outputs/hybrid_v3/never_touch_h4 \
+            --report_dir reports/hybrid_v3/never_touch_h4 || true
+
+      - name: Closure and delivery summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out=Path('outputs/hybrid_v3/never_touch_h4')
+          s={'records':0,'success':0,'error':0,'explicit_final':0,'primary_closed':0,'primary_unclosed':0,'finalizer_called':0,'finalizer_closed':0,'finalizer_failed':0,'delivery_normalized':0}
+          for p in sorted(out.glob('*.json')):
+              r=json.loads(p.read_text(encoding='utf-8')); s['records']+=1
+              if r.get('status')!='success': s['error']+=1; continue
+              s['success']+=1
+              if 'FINAL_ANSWER:' in r.get('final_response','').upper(): s['explicit_final']+=1
+              tr=r.get('trace',[])
+              sol=next((t for t in tr if t.get('step')=='solver_a'),None)
+              if sol:
+                  if sol.get('content',{}).get('has_closed_answer'): s['primary_closed']+=1
+                  else: s['primary_unclosed']+=1
+              if any(t.get('step')=='finalizer' for t in tr): s['finalizer_called']+=1
+              for t in tr:
+                  if t.get('step')=='closure_gate':
+                      st=t.get('content',{}).get('status')
+                      if st=='finalizer_closed': s['finalizer_closed']+=1
+                      elif st=='finalizer_failed': s['finalizer_failed']+=1
+                  elif t.get('step')=='delivery_normalization': s['delivery_normalized']+=1
+          path=Path('reports/hybrid_v3/never_touch_h4/closure_summary.json')
+          path.parent.mkdir(parents=True,exist_ok=True)
+          path.write_text(json.dumps(s,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(s,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: h4-never-touch-v1-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            outputs/hybrid_v3/never_touch_h4
+            reports/hybrid_v3/never_touch_h4
