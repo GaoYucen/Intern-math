@@ -47,6 +47,11 @@ class AgentConfig:
     temperature: float = 0.0
     max_tokens: int = 8192
 
+    @property
+    def mode(self) -> str:
+        """Compatibility shim for legacy runners; this is not a switch."""
+        return "direct"
+
     @classmethod
     def from_env(cls) -> "AgentConfig":
         return cls(
