@@ -5,6 +5,8 @@ on:
     branches: [r1-robust-baseline]
     paths:
       - ".github/workflows/r1-robust-smoke.yml"
+      - "user_agent.py"
+      - "tests/test_agent.py"
   workflow_dispatch:
 
 permissions:
