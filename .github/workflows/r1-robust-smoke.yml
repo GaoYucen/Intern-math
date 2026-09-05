@@ -1,0 +1,128 @@
+name: r1-robust-smoke
+
+on:
+  push:
+    branches: [r1-robust-baseline]
+    paths:
+      - ".github/workflows/r1-robust-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview-397b
+      INTERN_THINKING_MODE: "1"
+      AGENT_MAX_TOKENS: "8192"
+      AGENT_TEMPERATURE: "0.0"
+      LOCAL_MAX_CONCURRENCY: "2"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Verify API key
+        run: test -n "$INTERN_API_KEY"
+
+      - name: Build 17-domain objective smoke subset
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          inputs = [json.loads(x) for x in Path('data/benchmark_v1/input.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
+          gold = [json.loads(x) for x in Path('data/benchmark_v1/gold.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
+          assert len(inputs) == len(gold) == 340
+          input_by_idx = {row['idx']: row for row in inputs}
+          review_types = {'proof', 'explanation', 'derivation'}
+          selected = {}
+          for row in gold:
+              domain = row.get('domain', 'unknown')
+              if domain not in selected and row.get('answer_type', 'text') not in review_types:
+                  selected[domain] = row
+          for row in gold:
+              selected.setdefault(row.get('domain', 'unknown'), row)
+          rows = [selected[d] for d in sorted(selected)]
+          assert len(rows) == 17
+          Path('tmp').mkdir(exist_ok=True)
+          with Path('tmp/r1_smoke_input.jsonl').open('w', encoding='utf-8') as fi, Path('tmp/r1_smoke_gold.jsonl').open('w', encoding='utf-8') as fg:
+              for row in rows:
+                  fi.write(json.dumps(input_by_idx[row['idx']], ensure_ascii=False) + '\n')
+                  fg.write(json.dumps(row, ensure_ascii=False) + '\n')
+          print('idx=', [r['idx'] for r in rows])
+          print('domains=', [r['domain'] for r in rows])
+          PY
+
+      - name: Run R1 smoke
+        run: |
+          rm -rf outputs/r1_smoke reports/r1_smoke
+          python main.py --input_file tmp/r1_smoke_input.jsonl --output_dir outputs/r1_smoke
+
+      - name: Strict evaluation
+        if: always()
+        run: |
+          python scripts/evaluate_outputs.py \
+            --benchmark tmp/r1_smoke_gold.jsonl \
+            --output_dir outputs/r1_smoke \
+            --report_dir reports/r1_smoke || true
+
+      - name: Delivery telemetry
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out = Path('outputs/r1_smoke')
+          rows = []
+          for p in sorted(out.glob('*.json')):
+              try:
+                  rows.append(json.loads(p.read_text(encoding='utf-8')))
+              except Exception:
+                  pass
+          successful = [r for r in rows if r.get('status') == 'success']
+          texts = [str(r.get('final_response', '')) for r in successful]
+          trace_request_counts = []
+          for r in successful:
+              for t in r.get('trace', []):
+                  if t.get('step') == 'r1_single_solver':
+                      trace_request_counts.append(t.get('content', {}).get('request_count'))
+          telemetry = {
+              'records': len(rows),
+              'success': len(successful),
+              'errors': len(rows) - len(successful),
+              'final_marker_count': sum('FINAL_ANSWER:' in t.upper() for t in texts),
+              'nonempty_count': sum(bool(t.strip()) for t in texts),
+              'mean_response_chars': (sum(map(len, texts)) / len(texts)) if texts else 0,
+              'max_response_chars': max(map(len, texts)) if texts else 0,
+              'trace_request_counts': trace_request_counts,
+              'all_trace_request_counts_one': bool(trace_request_counts) and all(x == 1 for x in trace_request_counts),
+          }
+          Path('reports/r1_smoke').mkdir(parents=True, exist_ok=True)
+          Path('reports/r1_smoke/delivery_telemetry.json').write_text(json.dumps(telemetry, indent=2) + '\n', encoding='utf-8')
+          print(json.dumps(telemetry, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r1-robust-smoke-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            tmp/r1_smoke_input.jsonl
+            tmp/r1_smoke_gold.jsonl
+            outputs/r1_smoke
+            reports/r1_smoke
