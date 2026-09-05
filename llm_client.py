@@ -17,20 +17,23 @@ ChatResponse = Union[str, ChatMessage]
 class InternChatClient:
     """Small OpenAI-compatible client for the Intern challenge API.
 
-    This intentionally stays close to the official baseline contract while
-    exposing `thinking_mode`, which is useful for controlled baseline studies.
+    R1 defaults to exactly one HTTP attempt so benchmark request counts remain
+    interpretable. A caller may explicitly request a larger retry budget for
+    non-R1 utilities, but the competition runner uses the frozen default.
     """
 
     def __init__(
         self,
         timeout: int = 180,
-        retry: int = 3,
+        retry: int = 1,
         default_args: Optional[Mapping[str, Any]] = None,
         **request_args: Any,
     ) -> None:
         raw_api_key = os.environ.get("INTERN_API_KEY")
         if not raw_api_key:
             raise RuntimeError("Missing API key. Set INTERN_API_KEY.")
+        if retry < 1:
+            raise ValueError("retry must be >= 1")
         self.authorization = (
             raw_api_key if raw_api_key.startswith("Bearer ") else f"Bearer {raw_api_key}"
         )
