@@ -33,6 +33,7 @@ class AgentTest(unittest.TestCase):
         agent.solve("6*7?", {})
 
         kwargs = client.calls[0][1]
+        self.assertEqual(agent.config.mode, "direct")
         self.assertTrue(kwargs["thinking_mode"])
         self.assertEqual(kwargs["temperature"], 0.0)
         self.assertEqual(kwargs["max_tokens"], 8192)
@@ -49,6 +50,7 @@ class AgentTest(unittest.TestCase):
             agent = ReasoningAgent(client)
             agent.solve("6*7?", {})
 
+        self.assertEqual(agent.config.mode, "direct")
         self.assertEqual(len(client.calls), 1)
         kwargs = client.calls[0][1]
         self.assertFalse(kwargs["thinking_mode"])
