@@ -5,162 +5,106 @@ from typing import Any, Dict, List
 from llm_client import InternChatClient
 
 
-BASE_SYSTEM_PROMPT = """You are a rigorous mathematical problem-solving agent.
+R1_SYSTEM_PROMPT = """You are a rigorous mathematical problem-solving agent.
 Solve the problem independently and prioritize correctness.
 
-Use the model's internal reasoning to work carefully, but keep the visible response extremely concise.
+Use the model's internal reasoning carefully, but make sure the submitted response actually contains a concrete final answer before the inference budget ends.
 
 Rules:
-1. For multiple-choice, numeric, symbolic, short-answer, and yes/no problems, do not expose a long derivation. Return only one final line beginning with `FINAL_ANSWER:` followed by the actual answer.
-2. For proof/derivation problems, give only a concise proof containing the essential argument, then one final `FINAL_ANSWER:` line with the conclusion.
-3. Never spend tokens exploring abandoned approaches, repeatedly checking settled work, or narrating uncertainty.
-4. Check signs, domains, assumptions, edge cases, and option labels internally before answering.
-5. Do not literally copy placeholders such as `<answer>`.
-6. The final line is mandatory. Examples of format only:
-   FINAL_ANSWER: B
-   FINAL_ANSWER: -1
-   FINAL_ANSWER: x^2+1
-   FINAL_ANSWER: No
-The text after `FINAL_ANSWER:` must be the actual requested answer, not an explanation or meta-comment.
-"""
+1. Always finish with exactly one final line beginning with `FINAL_ANSWER:` followed by the actual requested answer or conclusion.
+2. For multiple-choice, numeric, symbolic, short-answer, and yes/no problems, keep the visible response concise and put the requested answer after `FINAL_ANSWER:`.
+3. For proof/derivation problems, give only the essential argument, then finish with the `FINAL_ANSWER:` line.
+4. Do not repeatedly restart, explore many abandoned approaches, or continue searching after a well-justified answer has been obtained.
+5. Reserve enough budget to state the final answer. If the budget is becoming tight, stop further exploration and commit to the best justified answer immediately.
+6. Check signs, domains, assumptions, edge cases, and option labels before finishing.
+7. Never output a placeholder such as `<answer>`.
 
-REFINE_SYSTEM_PROMPT = """You are a mathematical solution auditor.
-Independently verify the candidate answer. Think carefully but keep the visible
-response concise. Correct it if needed. For objective-answer questions, return
-only one line beginning with `FINAL_ANSWER:` followed by the actual answer. For
-a proof problem, give a concise repaired proof and then the final conclusion.
-Never output a placeholder.
+Examples of format only:
+FINAL_ANSWER: B
+FINAL_ANSWER: -1
+FINAL_ANSWER: x^2+1
+FINAL_ANSWER: No
 """
 
 
-def _optional_float(name: str) -> float | None:
-    raw = os.environ.get(name, "").strip()
-    return float(raw) if raw else None
-
-
-def _optional_int(name: str) -> int | None:
-    raw = os.environ.get(name, "").strip()
-    return int(raw) if raw else None
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 @dataclass(frozen=True)
 class AgentConfig:
-    """Configuration for controlled experiments."""
+    """R1 Robust Baseline configuration.
 
-    mode: str = "direct"  # direct | self_refine
+    R1 is deliberately restricted to exactly one model request per problem.
+    Only the inference settings below are configurable; there is no mode switch,
+    finalizer, verifier, self-refine pass, retry loop, or multi-agent path.
+    """
+
     thinking_mode: bool = True
-    temperature: float = 0.15
+    temperature: float = 0.0
     max_tokens: int = 8192
-    refine_temperature: float = 0.0
-    top_p: float | None = None
-    top_k: int | None = None
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
-        thinking_raw = os.environ.get("INTERN_THINKING_MODE", "1").strip().lower()
-        thinking = thinking_raw not in {"0", "false", "no", "off"}
         return cls(
-            mode=os.environ.get("AGENT_MODE", "direct").strip().lower(),
-            thinking_mode=thinking,
-            temperature=float(os.environ.get("AGENT_TEMPERATURE", "0.15")),
+            thinking_mode=_env_bool("INTERN_THINKING_MODE", True),
+            temperature=float(os.environ.get("AGENT_TEMPERATURE", "0.0")),
             max_tokens=int(os.environ.get("AGENT_MAX_TOKENS", "8192")),
-            refine_temperature=float(os.environ.get("REFINE_TEMPERATURE", "0.0")),
-            top_p=_optional_float("AGENT_TOP_P"),
-            top_k=_optional_int("AGENT_TOP_K"),
         )
 
 
 class ReasoningAgent:
-    """Competition-compatible reasoning agent for controlled calibration."""
+    """Competition-compatible single-call R1 baseline.
+
+    The platform injects the official client/model. R1 never overrides the
+    model and never makes a second request. The complete non-empty primary
+    response is preserved as ``final_response`` so later processing cannot
+    destroy evidence already produced by the solver.
+    """
 
     def __init__(
         self,
         client: InternChatClient,
         config: AgentConfig | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
+        del args, kwargs
         self.client = client
         self.config = config or AgentConfig.from_env()
-        if self.config.mode not in {"direct", "self_refine"}:
-            raise ValueError(
-                f"Unsupported AGENT_MODE={self.config.mode!r}; "
-                "expected 'direct' or 'self_refine'."
-            )
 
     def solve(self, problem: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
-        idx = metadata.get("idx", 0)
+        del metadata
         trace: List[Dict[str, Any]] = []
 
-        first = self._solve_once(problem)
-        trace.append(
-            {
-                "step": "direct_solver",
-                "content": {
-                    "status": "completed",
-                    "response_chars": len(first),
-                    "thinking_mode": self.config.thinking_mode,
-                },
-            }
-        )
-
-        if self.config.mode == "direct":
-            return {"final_response": first, "trace": trace}
-
-        refined = self._refine(problem, first, idx)
-        trace.append(
-            {
-                "step": "self_refine",
-                "content": {
-                    "status": "completed",
-                    "response_chars": len(refined),
-                    "thinking_mode": self.config.thinking_mode,
-                },
-            }
-        )
-        return {"final_response": refined, "trace": trace}
-
-    def _sampling_kwargs(self) -> Dict[str, Any]:
-        kwargs: Dict[str, Any] = {}
-        if self.config.top_p is not None:
-            kwargs["top_p"] = self.config.top_p
-        if self.config.top_k is not None:
-            kwargs["top_k"] = self.config.top_k
-        return kwargs
-
-    def _solve_once(self, problem: str) -> str:
         response = self.client.chat(
             [
-                {"role": "system", "content": BASE_SYSTEM_PROMPT},
+                {"role": "system", "content": R1_SYSTEM_PROMPT},
                 {"role": "user", "content": problem},
             ],
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
             thinking_mode=self.config.thinking_mode,
-            **self._sampling_kwargs(),
         )
-        return self._require_text(response)
+        final_response = self._require_text(response)
 
-    def _refine(self, problem: str, candidate: str, idx: Any) -> str:
-        del idx
-        response = self.client.chat(
-            [
-                {"role": "system", "content": REFINE_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        "PROBLEM:\n"
-                        f"{problem}\n\n"
-                        "CANDIDATE SOLUTION:\n"
-                        f"{candidate}\n\n"
-                        "Audit and, if necessary, correct the candidate."
-                    ),
+        trace.append(
+            {
+                "step": "r1_single_solver",
+                "content": {
+                    "status": "completed",
+                    "response_chars": len(final_response),
+                    "thinking_mode": self.config.thinking_mode,
+                    "temperature": self.config.temperature,
+                    "max_tokens": self.config.max_tokens,
+                    "request_count": 1,
                 },
-            ],
-            temperature=self.config.refine_temperature,
-            max_tokens=self.config.max_tokens,
-            thinking_mode=self.config.thinking_mode,
-            **self._sampling_kwargs(),
+            }
         )
-        return self._require_text(response)
+        return {"final_response": final_response, "trace": trace}
 
     @staticmethod
     def _require_text(response: Any) -> str:
