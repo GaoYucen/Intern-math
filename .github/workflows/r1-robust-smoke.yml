@@ -6,7 +6,13 @@ on:
     paths:
       - ".github/workflows/r1-robust-smoke.yml"
       - "user_agent.py"
+      - "llm_client.py"
+      - "main.py"
       - "tests/test_agent.py"
+      - "tests/test_llm_client.py"
+      - "requirements.txt"
+      - "scripts/evaluate_outputs.py"
+      - "data/benchmark_v1/**"
   workflow_dispatch:
 
 permissions:
