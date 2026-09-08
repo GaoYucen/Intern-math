@@ -5,7 +5,7 @@ on:
     branches: [r1-robust-baseline]
     paths:
       - ".github/workflows/r1-closure-diagnostic.yml"
-      - "scripts/r1_closure_diagnostic.py"
+      - "scripts/r1_thinking_diagnostic.py"
       - "experiments/r1_closure_diagnostic.trigger"
   workflow_dispatch:
 
@@ -37,44 +37,23 @@ jobs:
       - name: Unit tests
         run: pytest -q
 
-      - name: Current prompt at 6144
-        continue-on-error: true
+      - name: Run interleaved thinking-mode diagnostic
         run: |
-          python scripts/r1_closure_diagnostic.py \
-            --prompt current \
-            --max-tokens 6144 \
-            --concurrency 2 \
-            --output-dir outputs/r1_closure/current_6144
-          python scripts/evaluate_outputs.py \
-            --benchmark outputs/r1_closure/bundle/gold.jsonl \
-            --output_dir outputs/r1_closure/current_6144 \
-            --report_dir reports/r1_closure/current_6144 || true
+          rm -rf outputs/r1_thinking reports/r1_thinking
+          python scripts/r1_thinking_diagnostic.py \
+            --output-root outputs/r1_thinking \
+            --summary-root reports/r1_thinking/raw \
+            --concurrency 2
 
-      - name: Commit-first prompt at 8192
-        continue-on-error: true
+      - name: Strict evaluation by variant
+        if: always()
         run: |
-          python scripts/r1_closure_diagnostic.py \
-            --prompt commit_first \
-            --max-tokens 8192 \
-            --concurrency 2 \
-            --output-dir outputs/r1_closure/commit_first_8192
-          python scripts/evaluate_outputs.py \
-            --benchmark outputs/r1_closure/bundle/gold.jsonl \
-            --output_dir outputs/r1_closure/commit_first_8192 \
-            --report_dir reports/r1_closure/commit_first_8192 || true
-
-      - name: Commit-first prompt at 6144
-        continue-on-error: true
-        run: |
-          python scripts/r1_closure_diagnostic.py \
-            --prompt commit_first \
-            --max-tokens 6144 \
-            --concurrency 2 \
-            --output-dir outputs/r1_closure/commit_first_6144
-          python scripts/evaluate_outputs.py \
-            --benchmark outputs/r1_closure/bundle/gold.jsonl \
-            --output_dir outputs/r1_closure/commit_first_6144 \
-            --report_dir reports/r1_closure/commit_first_6144 || true
+          for v in thinking_true_8192 thinking_false_8192 thinking_false_6144; do
+            python scripts/evaluate_outputs.py \
+              --benchmark outputs/r1_thinking/bundle/gold.jsonl \
+              --output_dir outputs/r1_thinking/$v \
+              --report_dir reports/r1_thinking/strict/$v || true
+          done
 
       - name: Compare variants
         if: always()
@@ -82,46 +61,47 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          root = Path('outputs/r1_closure')
+          variants = ['thinking_true_8192', 'thinking_false_8192', 'thinking_false_6144']
           rows = []
-          for name in ['current_6144', 'commit_first_8192', 'commit_first_6144']:
-              p = root / name / 'summary.json'
-              if not p.exists():
-                  continue
-              s = json.loads(p.read_text(encoding='utf-8'))
-              report = Path('reports/r1_closure') / name / 'summary.json'
-              strict = json.loads(report.read_text(encoding='utf-8')) if report.exists() else {}
+          for name in variants:
+              raw_path = Path('reports/r1_thinking/raw') / f'{name}.json'
+              strict_path = Path('reports/r1_thinking/strict') / name / 'summary.json'
+              raw = json.loads(raw_path.read_text(encoding='utf-8')) if raw_path.exists() else {}
+              strict = json.loads(strict_path.read_text(encoding='utf-8')) if strict_path.exists() else {}
               rows.append({
                   'variant': name,
-                  'success': s.get('success'),
-                  'errors': s.get('errors'),
-                  'final_marker_rate': s.get('final_marker_rate'),
-                  'length_finish_count': s.get('length_finish_count'),
-                  'http_attempts': s.get('http_attempts'),
-                  'retries': s.get('retries'),
+                  'thinking_mode': raw.get('thinking_mode'),
+                  'max_tokens': raw.get('max_tokens'),
+                  'success': raw.get('success'),
+                  'errors': raw.get('errors'),
+                  'final_marker_count': raw.get('final_marker_count'),
+                  'final_marker_rate': raw.get('final_marker_rate'),
+                  'length_finish_count': raw.get('length_finish_count'),
+                  'stop_finish_count': raw.get('stop_finish_count'),
+                  'http_attempts': raw.get('http_attempts'),
+                  'retries': raw.get('retries'),
+                  'mean_http_attempts': raw.get('mean_http_attempts'),
                   'strict_counts': strict.get('counts'),
                   'auto_scored': strict.get('auto_scored'),
                   'auto_scored_accuracy': strict.get('auto_scored_accuracy'),
-                  'items': s.get('items'),
+                  'items': raw.get('items'),
               })
-          out = {'known_baseline_current_8192': {
-                    'run_id': 34201759124,
-                    'hard_cases': [3,10,29,40],
-                    'final_marker_count': 0,
-                    'length_finish_count': 4,
-                    'note': 'All four targeted cases were finish_reason=length at 8192 in the accepted transport-reliability smoke.'
-                 },
-                 'variants': rows}
-          Path('reports/r1_closure').mkdir(parents=True, exist_ok=True)
-          Path('reports/r1_closure/comparison.json').write_text(json.dumps(out, indent=2)+'\n', encoding='utf-8')
+          out = {
+              'experiment': 'R1 thinking-mode hard-case diagnostic',
+              'hard_cases': [3, 10, 29, 40],
+              'variants': rows,
+          }
+          target = Path('reports/r1_thinking/comparison.json')
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_text(json.dumps(out, indent=2) + '\n', encoding='utf-8')
           print(json.dumps(out, indent=2))
           PY
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: r1-closure-diagnostic-${{ github.run_id }}
+          name: r1-thinking-diagnostic-${{ github.run_id }}
           retention-days: 30
           path: |
-            outputs/r1_closure
-            reports/r1_closure
+            outputs/r1_thinking
+            reports/r1_thinking
