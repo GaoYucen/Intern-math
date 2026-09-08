@@ -17,7 +17,7 @@ jobs:
     env:
       INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
       INTERN_MODEL: intern-s2-preview-397b
-      INTERN_THINKING_MODE: "1"
+      INTERN_THINKING_MODE: "0"
       AGENT_MAX_TOKENS: "8192"
       AGENT_TEMPERATURE: "0.0"
       LOCAL_MAX_CONCURRENCY: "2"
@@ -39,6 +39,8 @@ jobs:
           pip install pytest
 
       - name: Unit tests
+        env:
+          INTERN_THINKING_MODE: "1"
         run: pytest -q
 
       - name: Verify API key
@@ -90,12 +92,19 @@ jobs:
           retried_idx=[idx for (idx,_),n in zip(solver,http_attempt_counts) if isinstance(n,int) and n>1]
           terminal_errors=[]
           total_latencies=[]
+          finish_reasons=[]
+          completion_tokens=[]
           for idx,c in solver:
               meta=c.get('client_telemetry',{})
               if meta.get('terminal_error_type'):
                   terminal_errors.append({'idx':idx,'type':meta.get('terminal_error_type')})
               if isinstance(meta.get('total_latency_seconds'),(int,float)):
                   total_latencies.append(meta['total_latency_seconds'])
+              if meta.get('finish_reason') is not None:
+                  finish_reasons.append(meta.get('finish_reason'))
+              usage=meta.get('usage') or {}
+              if isinstance(usage.get('completion_tokens'),int):
+                  completion_tokens.append(usage['completion_tokens'])
 
           telemetry={
               'records':len(rows),
@@ -114,8 +123,13 @@ jobs:
               'transport_retry_total':sum(max(0,x-1) for x in http_attempt_counts if isinstance(x,int)),
               'retried_idx':retried_idx,
               'terminal_errors':terminal_errors,
+              'finish_reasons':finish_reasons,
+              'length_finish_count':sum(x=='length' for x in finish_reasons),
+              'stop_finish_count':sum(x=='stop' for x in finish_reasons),
               'mean_total_latency_seconds':sum(total_latencies)/len(total_latencies) if total_latencies else None,
               'max_total_latency_seconds':max(total_latencies) if total_latencies else None,
+              'mean_completion_tokens':sum(completion_tokens)/len(completion_tokens) if completion_tokens else None,
+              'max_completion_tokens':max(completion_tokens) if completion_tokens else None,
               'missing_marker_idx':[r.get('idx') for r,t in zip(successful,texts) if 'FINAL_ANSWER:' not in t.upper()],
           }
           Path('reports/r1_long_stress').mkdir(parents=True, exist_ok=True)
