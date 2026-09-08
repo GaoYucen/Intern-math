@@ -1,0 +1,107 @@
+name: r1-thinking-diagnostic
+
+on:
+  push:
+    branches: [r1-robust-baseline]
+    paths:
+      - ".github/workflows/r1-thinking-diagnostic.yml"
+      - "scripts/r1_thinking_diagnostic.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview-397b
+      INTERN_TRANSPORT_ATTEMPTS: "2"
+      INTERN_CONNECT_TIMEOUT: "20"
+      INTERN_READ_TIMEOUT: "360"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Run interleaved thinking diagnostic
+        run: |
+          rm -rf outputs/r1_thinking reports/r1_thinking
+          python scripts/r1_thinking_diagnostic.py \
+            --output-root outputs/r1_thinking \
+            --summary-root reports/r1_thinking/raw \
+            --concurrency 2
+
+      - name: Strict evaluation by variant
+        if: always()
+        run: |
+          for v in thinking_true_8192 thinking_false_8192 thinking_false_6144; do
+            python scripts/evaluate_outputs.py \
+              --benchmark outputs/r1_thinking/bundle/gold.jsonl \
+              --output_dir outputs/r1_thinking/$v \
+              --report_dir reports/r1_thinking/strict/$v || true
+          done
+
+      - name: Compare variants
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          variants = ['thinking_true_8192', 'thinking_false_8192', 'thinking_false_6144']
+          rows = []
+          for name in variants:
+              raw_path = Path('reports/r1_thinking/raw') / f'{name}.json'
+              strict_path = Path('reports/r1_thinking/strict') / name / 'summary.json'
+              raw = json.loads(raw_path.read_text(encoding='utf-8')) if raw_path.exists() else {}
+              strict = json.loads(strict_path.read_text(encoding='utf-8')) if strict_path.exists() else {}
+              rows.append({
+                  'variant': name,
+                  'thinking_mode': raw.get('thinking_mode'),
+                  'max_tokens': raw.get('max_tokens'),
+                  'success': raw.get('success'),
+                  'errors': raw.get('errors'),
+                  'final_marker_count': raw.get('final_marker_count'),
+                  'final_marker_rate': raw.get('final_marker_rate'),
+                  'length_finish_count': raw.get('length_finish_count'),
+                  'stop_finish_count': raw.get('stop_finish_count'),
+                  'http_attempts': raw.get('http_attempts'),
+                  'retries': raw.get('retries'),
+                  'mean_http_attempts': raw.get('mean_http_attempts'),
+                  'strict_counts': strict.get('counts'),
+                  'auto_scored': strict.get('auto_scored'),
+                  'auto_scored_accuracy': strict.get('auto_scored_accuracy'),
+                  'items': raw.get('items'),
+              })
+          out = {
+              'experiment': 'R1 thinking-mode hard-case diagnostic',
+              'hard_cases': [3, 10, 29, 40],
+              'variants': rows,
+          }
+          target = Path('reports/r1_thinking/comparison.json')
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_text(json.dumps(out, indent=2) + '\n', encoding='utf-8')
+          print(json.dumps(out, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r1-thinking-diagnostic-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            outputs/r1_thinking
+            reports/r1_thinking
