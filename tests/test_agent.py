@@ -6,10 +6,11 @@ from user_agent import AgentConfig, ReasoningAgent
 
 
 class FakeClient:
-    def __init__(self, response="Reasoning.\nFINAL_ANSWER: 42"):
+    def __init__(self, response="Reasoning.\nFINAL_ANSWER: 42", telemetry=None):
         self.calls = []
         self.model = "fake"
         self.response = response
+        self.last_response_meta = dict(telemetry or {})
 
     def chat(self, messages, **kwargs):
         self.calls.append((messages, kwargs))
@@ -63,6 +64,22 @@ class AgentTest(unittest.TestCase):
         out = ReasoningAgent(client).solve("6*7?", {})
         self.assertEqual(out["final_response"], response)
         self.assertEqual(len(client.calls), 1)
+
+    def test_client_telemetry_is_side_channel_only(self):
+        telemetry = {
+            "finish_reason": "stop",
+            "usage": {"total_tokens": 123},
+            "latency_seconds": 12.5,
+            "attempts_used": 1,
+        }
+        client = FakeClient(telemetry=telemetry)
+        out = ReasoningAgent(client).solve("6*7?", {})
+
+        self.assertEqual(out["final_response"], "Reasoning.\nFINAL_ANSWER: 42")
+        self.assertEqual(len(client.calls), 1)
+        trace = out["trace"][0]["content"]
+        self.assertEqual(trace["request_count"], 1)
+        self.assertEqual(trace["client_telemetry"], telemetry)
 
     def test_empty_response_fails_without_retry(self):
         client = FakeClient(response="   ")

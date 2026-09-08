@@ -96,19 +96,19 @@ class ReasoningAgent:
         )
         final_response = self._require_text(response)
 
-        trace.append(
-            {
-                "step": "r1_single_solver",
-                "content": {
-                    "status": "completed",
-                    "response_chars": len(final_response),
-                    "thinking_mode": self.config.thinking_mode,
-                    "temperature": self.config.temperature,
-                    "max_tokens": self.config.max_tokens,
-                    "request_count": 1,
-                },
-            }
-        )
+        trace_content: Dict[str, Any] = {
+            "status": "completed",
+            "response_chars": len(final_response),
+            "thinking_mode": self.config.thinking_mode,
+            "temperature": self.config.temperature,
+            "max_tokens": self.config.max_tokens,
+            "request_count": 1,
+        }
+        client_telemetry = getattr(self.client, "last_response_meta", None)
+        if isinstance(client_telemetry, dict) and client_telemetry:
+            trace_content["client_telemetry"] = dict(client_telemetry)
+
+        trace.append({"step": "r1_single_solver", "content": trace_content})
         return {"final_response": final_response, "trace": trace}
 
     @staticmethod
