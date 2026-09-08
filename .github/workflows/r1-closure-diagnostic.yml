@@ -38,6 +38,7 @@ jobs:
         run: pytest -q
 
       - name: Current prompt at 6144
+        continue-on-error: true
         run: |
           python scripts/r1_closure_diagnostic.py \
             --prompt current \
@@ -50,6 +51,7 @@ jobs:
             --report_dir reports/r1_closure/current_6144 || true
 
       - name: Commit-first prompt at 8192
+        continue-on-error: true
         run: |
           python scripts/r1_closure_diagnostic.py \
             --prompt commit_first \
@@ -62,6 +64,7 @@ jobs:
             --report_dir reports/r1_closure/commit_first_8192 || true
 
       - name: Commit-first prompt at 6144
+        continue-on-error: true
         run: |
           python scripts/r1_closure_diagnostic.py \
             --prompt commit_first \
