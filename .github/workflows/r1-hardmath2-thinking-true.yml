@@ -1,0 +1,135 @@
+name: r1-hardmath2-thinking-true
+
+on:
+  push:
+    branches: [r1-robust-baseline]
+    paths:
+      - ".github/workflows/r1-hardmath2-thinking-true.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview-397b
+      INTERN_THINKING_MODE: "1"
+      AGENT_MAX_TOKENS: "8192"
+      AGENT_TEMPERATURE: "0.0"
+      LOCAL_MAX_CONCURRENCY: "2"
+      INTERN_CONNECT_TIMEOUT: "20"
+      INTERN_READ_TIMEOUT: "360"
+      INTERN_TRANSPORT_ATTEMPTS: "2"
+      INTERN_RETRY_BACKOFF_MIN: "2"
+      INTERN_RETRY_BACKOFF_MAX: "5"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Verify API key
+        run: test -n "$INTERN_API_KEY"
+
+      - name: Build same 10-item hardmath2 subset
+        run: |
+          python scripts/build_long_reasoning_stress.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          inputs=[json.loads(x) for x in Path('data/long_reasoning_stress/input.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
+          gold=[json.loads(x) for x in Path('data/long_reasoning_stress/gold.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
+          input_by_idx={r['idx']:r for r in inputs}
+          selected=[r for r in gold if r.get('source_dataset')=='hardmath2']
+          assert len(selected)==10, len(selected)
+          Path('tmp').mkdir(exist_ok=True)
+          with Path('tmp/hardmath2_input.jsonl').open('w',encoding='utf-8') as fi, Path('tmp/hardmath2_gold.jsonl').open('w',encoding='utf-8') as fg:
+              for row in selected:
+                  fi.write(json.dumps(input_by_idx[row['idx']],ensure_ascii=False)+'\n')
+                  fg.write(json.dumps(row,ensure_ascii=False)+'\n')
+          print('idx=',[r['idx'] for r in selected])
+          PY
+
+      - name: Run hardmath2 thinking-on diagnostic
+        run: |
+          rm -rf outputs/r1_hardmath2_thinking_true reports/r1_hardmath2_thinking_true
+          python main.py --input_file tmp/hardmath2_input.jsonl --output_dir outputs/r1_hardmath2_thinking_true
+
+      - name: Strict evaluation
+        if: always()
+        run: |
+          python scripts/evaluate_outputs.py \
+            --benchmark tmp/hardmath2_gold.jsonl \
+            --output_dir outputs/r1_hardmath2_thinking_true \
+            --report_dir reports/r1_hardmath2_thinking_true || true
+
+      - name: Delivery telemetry
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows=[]
+          for p in sorted(Path('outputs/r1_hardmath2_thinking_true').glob('*.json')):
+              try: rows.append(json.loads(p.read_text(encoding='utf-8')))
+              except Exception: pass
+          rows.sort(key=lambda r:r.get('idx',-1))
+          successful=[r for r in rows if r.get('status')=='success']
+          items=[]
+          for r in rows:
+              content={}
+              for t in r.get('trace',[]):
+                  if t.get('step')=='r1_single_solver':
+                      content=t.get('content',{})
+                      break
+              meta=content.get('client_telemetry',{}) or {}
+              usage=meta.get('usage') or {}
+              text=str(r.get('final_response',''))
+              items.append({
+                  'idx':r.get('idx'),
+                  'status':r.get('status'),
+                  'final_marker':'FINAL_ANSWER:' in text.upper(),
+                  'finish_reason':meta.get('finish_reason'),
+                  'completion_tokens':usage.get('completion_tokens'),
+                  'latency_seconds':meta.get('total_latency_seconds'),
+                  'http_attempt_count':content.get('http_attempt_count'),
+                  'response_chars':len(text),
+              })
+          telemetry={
+              'records':len(rows),
+              'success':len(successful),
+              'errors':len(rows)-len(successful),
+              'final_marker_count':sum(i['final_marker'] for i in items),
+              'length_finish_count':sum(i['finish_reason']=='length' for i in items),
+              'stop_finish_count':sum(i['finish_reason']=='stop' for i in items),
+              'http_attempt_total':sum(i['http_attempt_count'] or 0 for i in items),
+              'transport_retry_total':sum(max(0,(i['http_attempt_count'] or 1)-1) for i in items),
+              'items':items,
+          }
+          Path('reports/r1_hardmath2_thinking_true').mkdir(parents=True,exist_ok=True)
+          Path('reports/r1_hardmath2_thinking_true/delivery_telemetry.json').write_text(json.dumps(telemetry,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(telemetry,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r1-hardmath2-thinking-true-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            tmp/hardmath2_gold.jsonl
+            outputs/r1_hardmath2_thinking_true
+            reports/r1_hardmath2_thinking_true
