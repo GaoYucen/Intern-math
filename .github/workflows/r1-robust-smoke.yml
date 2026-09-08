@@ -8,8 +8,7 @@ on:
       - "user_agent.py"
       - "llm_client.py"
       - "main.py"
-      - "tests/test_agent.py"
-      - "tests/test_llm_client.py"
+      - "tests/**"
       - "requirements.txt"
       - "scripts/evaluate_outputs.py"
       - "data/benchmark_v1/**"
@@ -29,6 +28,11 @@ jobs:
       AGENT_MAX_TOKENS: "8192"
       AGENT_TEMPERATURE: "0.0"
       LOCAL_MAX_CONCURRENCY: "2"
+      INTERN_CONNECT_TIMEOUT: "20"
+      INTERN_READ_TIMEOUT: "360"
+      INTERN_TRANSPORT_ATTEMPTS: "2"
+      INTERN_RETRY_BACKOFF_MIN: "2"
+      INTERN_RETRY_BACKOFF_MAX: "5"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -94,30 +98,57 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          out = Path('outputs/r1_smoke')
+
           rows = []
-          for p in sorted(out.glob('*.json')):
+          for p in sorted(Path('outputs/r1_smoke').glob('*.json')):
               try:
                   rows.append(json.loads(p.read_text(encoding='utf-8')))
               except Exception:
                   pass
+
           successful = [r for r in rows if r.get('status') == 'success']
           texts = [str(r.get('final_response', '')) for r in successful]
-          trace_request_counts = []
-          for r in successful:
+          solver = []
+          for r in rows:
               for t in r.get('trace', []):
                   if t.get('step') == 'r1_single_solver':
-                      trace_request_counts.append(t.get('content', {}).get('request_count'))
+                      solver.append((r.get('idx'), t.get('content', {})))
+                      break
+
+          semantic_counts = [c.get('request_count') for _, c in solver]
+          http_attempt_counts = [c.get('http_attempt_count', 1) for _, c in solver]
+          retried_idx = [idx for (idx, _), n in zip(solver, http_attempt_counts) if isinstance(n, int) and n > 1]
+          terminal_errors = []
+          finish_reasons = []
+          total_latencies = []
+          for idx, c in solver:
+              meta = c.get('client_telemetry', {})
+              if meta.get('terminal_error_type'):
+                  terminal_errors.append({'idx': idx, 'type': meta.get('terminal_error_type')})
+              if meta.get('finish_reason') is not None:
+                  finish_reasons.append(meta.get('finish_reason'))
+              if isinstance(meta.get('total_latency_seconds'), (int, float)):
+                  total_latencies.append(meta['total_latency_seconds'])
+
           telemetry = {
               'records': len(rows),
               'success': len(successful),
               'errors': len(rows) - len(successful),
               'final_marker_count': sum('FINAL_ANSWER:' in t.upper() for t in texts),
+              'final_marker_rate_on_success': (sum('FINAL_ANSWER:' in t.upper() for t in texts) / len(texts)) if texts else 0,
               'nonempty_count': sum(bool(t.strip()) for t in texts),
               'mean_response_chars': (sum(map(len, texts)) / len(texts)) if texts else 0,
               'max_response_chars': max(map(len, texts)) if texts else 0,
-              'trace_request_counts': trace_request_counts,
-              'all_trace_request_counts_one': bool(trace_request_counts) and all(x == 1 for x in trace_request_counts),
+              'semantic_request_counts': semantic_counts,
+              'all_semantic_request_counts_one': bool(semantic_counts) and all(x == 1 for x in semantic_counts),
+              'http_attempt_counts': http_attempt_counts,
+              'http_attempt_total': sum(x for x in http_attempt_counts if isinstance(x, int)),
+              'transport_retry_total': sum(max(0, x - 1) for x in http_attempt_counts if isinstance(x, int)),
+              'retried_idx': retried_idx,
+              'terminal_errors': terminal_errors,
+              'finish_reasons': finish_reasons,
+              'mean_total_latency_seconds': (sum(total_latencies) / len(total_latencies)) if total_latencies else None,
+              'max_total_latency_seconds': max(total_latencies) if total_latencies else None,
           }
           Path('reports/r1_smoke').mkdir(parents=True, exist_ok=True)
           Path('reports/r1_smoke/delivery_telemetry.json').write_text(json.dumps(telemetry, indent=2) + '\n', encoding='utf-8')

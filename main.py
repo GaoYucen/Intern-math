@@ -3,7 +3,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from llm_client import InternChatClient
 from user_agent import ReasoningAgent
@@ -54,6 +54,36 @@ def build_output_record(item: Dict, agent_result: Dict) -> Dict:
     }
 
 
+def _client_telemetry_from_exception(agent: ReasoningAgent, exc: Exception) -> Dict[str, Any]:
+    telemetry = getattr(exc, "telemetry", None)
+    if isinstance(telemetry, dict) and telemetry:
+        return dict(telemetry)
+    getter = getattr(agent.client, "get_last_response_meta", None)
+    if callable(getter):
+        value = getter()
+        if isinstance(value, dict):
+            return dict(value)
+    return {}
+
+
+def build_error_record(item: Dict, agent: ReasoningAgent, exc: Exception) -> Dict:
+    telemetry = _client_telemetry_from_exception(agent, exc)
+    trace_content: Dict[str, Any] = {
+        "status": "error",
+        "request_count": 1,
+        "http_attempt_count": telemetry.get("http_attempt_count", 1),
+    }
+    if telemetry:
+        trace_content["client_telemetry"] = telemetry
+    return {
+        "idx": item["idx"],
+        "status": "error",
+        "final_response": "",
+        "error": {"type": type(exc).__name__, "message": str(exc)},
+        "trace": [{"step": "r1_single_solver", "content": trace_content}],
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Intern-math benchmark runner")
     parser.add_argument("--input_file", required=True, help="Path to input JSONL")
@@ -63,8 +93,11 @@ def parse_args() -> argparse.Namespace:
 
 def solve_item(agent: ReasoningAgent, item: Dict) -> Dict:
     metadata = {k: v for k, v in item.items() if k not in {"problem", "answer"}}
-    result = agent.solve(problem=item["problem"], metadata=metadata)
-    return build_output_record(item, result)
+    try:
+        result = agent.solve(problem=item["problem"], metadata=metadata)
+        return build_output_record(item, result)
+    except Exception as exc:
+        return build_error_record(item, agent, exc)
 
 
 async def process_item(
@@ -81,7 +114,7 @@ async def process_item(
     async with semaphore:
         try:
             record = await asyncio.to_thread(solve_item, agent, item)
-        except Exception as exc:  # keep one record per item
+        except Exception as exc:  # defensive runner failure
             record = {
                 "idx": item["idx"],
                 "status": "error",
@@ -105,7 +138,7 @@ async def run(args: argparse.Namespace) -> None:
     print(
         f"Loaded {len(items)} items. Max concurrency: {LOCAL_MAX_CONCURRENCY}. "
         f"Model: {client.model}; mode: {agent.config.mode}; "
-        f"thinking: {agent.config.thinking_mode}."
+        f"thinking: {agent.config.thinking_mode}; transport attempts: {client.retry}."
     )
     tasks = [process_item(agent, item, output_dir, semaphore) for item in items]
     await asyncio.gather(*tasks)

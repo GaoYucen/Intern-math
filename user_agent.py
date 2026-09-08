@@ -38,9 +38,9 @@ def _env_bool(name: str, default: bool) -> bool:
 class AgentConfig:
     """R1 Robust Baseline configuration.
 
-    R1 is deliberately restricted to exactly one model request per problem.
-    Only the inference settings below are configurable; there is no mode switch,
-    finalizer, verifier, self-refine pass, retry loop, or multi-agent path.
+    R1 is deliberately restricted to exactly one semantic model solve per
+    problem. Transport recovery is handled below the agent layer and never
+    creates a finalizer, verifier, self-refine pass, or second semantic solve.
     """
 
     thinking_mode: bool = True
@@ -62,13 +62,7 @@ class AgentConfig:
 
 
 class ReasoningAgent:
-    """Competition-compatible single-call R1 baseline.
-
-    The platform injects the official client/model. R1 never overrides the
-    model and never makes a second request. The complete non-empty primary
-    response is preserved as ``final_response`` so later processing cannot
-    destroy evidence already produced by the solver.
-    """
+    """Competition-compatible single-semantic-solve R1 baseline."""
 
     def __init__(
         self,
@@ -104,9 +98,16 @@ class ReasoningAgent:
             "max_tokens": self.config.max_tokens,
             "request_count": 1,
         }
-        client_telemetry = getattr(self.client, "last_response_meta", None)
+        getter = getattr(self.client, "get_last_response_meta", None)
+        if callable(getter):
+            client_telemetry = getter()
+        else:
+            client_telemetry = getattr(self.client, "last_response_meta", None)
         if isinstance(client_telemetry, dict) and client_telemetry:
             trace_content["client_telemetry"] = dict(client_telemetry)
+            trace_content["http_attempt_count"] = client_telemetry.get(
+                "http_attempt_count", 1
+            )
 
         trace.append({"step": "r1_single_solver", "content": trace_content})
         return {"final_response": final_response, "trace": trace}
