@@ -1,0 +1,124 @@
+name: r1-closure-diagnostic
+
+on:
+  push:
+    branches: [r1-robust-baseline]
+    paths:
+      - ".github/workflows/r1-closure-diagnostic.yml"
+      - "scripts/r1_closure_diagnostic.py"
+      - "experiments/r1_closure_diagnostic.trigger"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+      INTERN_MODEL: intern-s2-preview-397b
+      INTERN_TRANSPORT_ATTEMPTS: "2"
+      INTERN_CONNECT_TIMEOUT: "20"
+      INTERN_READ_TIMEOUT: "360"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Current prompt at 6144
+        run: |
+          python scripts/r1_closure_diagnostic.py \
+            --prompt current \
+            --max-tokens 6144 \
+            --concurrency 2 \
+            --output-dir outputs/r1_closure/current_6144
+          python scripts/evaluate_outputs.py \
+            --benchmark outputs/r1_closure/bundle/gold.jsonl \
+            --output_dir outputs/r1_closure/current_6144 \
+            --report_dir reports/r1_closure/current_6144 || true
+
+      - name: Commit-first prompt at 8192
+        run: |
+          python scripts/r1_closure_diagnostic.py \
+            --prompt commit_first \
+            --max-tokens 8192 \
+            --concurrency 2 \
+            --output-dir outputs/r1_closure/commit_first_8192
+          python scripts/evaluate_outputs.py \
+            --benchmark outputs/r1_closure/bundle/gold.jsonl \
+            --output_dir outputs/r1_closure/commit_first_8192 \
+            --report_dir reports/r1_closure/commit_first_8192 || true
+
+      - name: Commit-first prompt at 6144
+        run: |
+          python scripts/r1_closure_diagnostic.py \
+            --prompt commit_first \
+            --max-tokens 6144 \
+            --concurrency 2 \
+            --output-dir outputs/r1_closure/commit_first_6144
+          python scripts/evaluate_outputs.py \
+            --benchmark outputs/r1_closure/bundle/gold.jsonl \
+            --output_dir outputs/r1_closure/commit_first_6144 \
+            --report_dir reports/r1_closure/commit_first_6144 || true
+
+      - name: Compare variants
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('outputs/r1_closure')
+          rows = []
+          for name in ['current_6144', 'commit_first_8192', 'commit_first_6144']:
+              p = root / name / 'summary.json'
+              if not p.exists():
+                  continue
+              s = json.loads(p.read_text(encoding='utf-8'))
+              report = Path('reports/r1_closure') / name / 'summary.json'
+              strict = json.loads(report.read_text(encoding='utf-8')) if report.exists() else {}
+              rows.append({
+                  'variant': name,
+                  'success': s.get('success'),
+                  'errors': s.get('errors'),
+                  'final_marker_rate': s.get('final_marker_rate'),
+                  'length_finish_count': s.get('length_finish_count'),
+                  'http_attempts': s.get('http_attempts'),
+                  'retries': s.get('retries'),
+                  'strict_counts': strict.get('counts'),
+                  'auto_scored': strict.get('auto_scored'),
+                  'auto_scored_accuracy': strict.get('auto_scored_accuracy'),
+                  'items': s.get('items'),
+              })
+          out = {'known_baseline_current_8192': {
+                    'run_id': 34201759124,
+                    'hard_cases': [3,10,29,40],
+                    'final_marker_count': 0,
+                    'length_finish_count': 4,
+                    'note': 'All four targeted cases were finish_reason=length at 8192 in the accepted transport-reliability smoke.'
+                 },
+                 'variants': rows}
+          Path('reports/r1_closure').mkdir(parents=True, exist_ok=True)
+          Path('reports/r1_closure/comparison.json').write_text(json.dumps(out, indent=2)+'\n', encoding='utf-8')
+          print(json.dumps(out, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r1-closure-diagnostic-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            outputs/r1_closure
+            reports/r1_closure
