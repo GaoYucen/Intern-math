@@ -1,0 +1,50 @@
+name: r2-paired-eval
+on:
+  push:
+    branches: [r2-budgeted-tools-v1]
+    paths: ['experiments/r2_paired.trigger']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: intern-math-r2-paired
+  cancel-in-progress: false
+jobs:
+  paired:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      INTERN_MODEL: intern-s2-preview-397b
+      INTERN_READ_TIMEOUT: '240'
+      INTERN_CONNECT_TIMEOUT: '20'
+      INTERN_TRANSPORT_ATTEMPTS: '2'
+      INTERN_RETRY_BACKOFF_MIN: '3'
+      INTERN_RETRY_BACKOFF_MAX: '8'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install local test dependencies
+        run: pip install 'requests>=2.31,<3' 'sympy==1.14.0' pytest
+      - name: Frozen baseline and unit tests
+        run: |
+          git show b566534fc1c3495d0e6c42c97265ffd087f19e26:user_agent.py > _r1_snapshot.py
+          python -m pytest tests/test_r2_agent.py -q
+          python -m compileall -q user_agent.py r2_agent.py math_tools.py scripts/r2_eval.py
+      - name: Paired model evaluation (no official submissions)
+        env:
+          INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+        run: |
+          test -n "$INTERN_API_KEY"
+          python scripts/r2_eval.py --per-domain 2 --workers 3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r2-paired-${{ github.run_id }}
+          path: reports/r2_paired
+          retention-days: 14
+          if-no-files-found: warn
