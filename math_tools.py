@@ -8,16 +8,17 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
 import sys
 import tempfile
 
-SYMPY_NAMES = set('Symbol symbols Rational Integer Float Matrix ImmutableMatrix Eq Ne Lt Le Gt Ge And Or Not sqrt root real_root sin cos tan asin acos atan atan2 sinh cosh tanh exp log Abs sign floor ceiling factorial factorial2 binomial ff rf fibonacci lucas bell bernoulli harmonic gamma beta zeta pi E I oo S N simplify expand factor cancel together apart collect solve linsolve nonlinsolve solveset reduce_inequalities diff integrate limit summation product residue series conjugate re im transpose det eye zeros ones diag gcd lcm mod_inverse isprime nextprime prevprime primerange factorint totient divisors divisor_count degree Poly resultant discriminant Function Derivative Integral Sum Product FiniteSet Interval Union Intersection Complement EmptySet Reals Integers Piecewise dsolve simplify_logic kronecker_symbol legendre_symbol'.split())
+SYMPY_NAMES = set('Symbol symbols Rational Integer Float Matrix ImmutableMatrix Eq Ne Lt Le Gt Ge And Or Not sqrt root real_root sin cos tan asin acos atan atan2 sinh cosh tanh exp log Abs sign floor ceiling factorial factorial2 binomial ff rf fibonacci lucas bell bernoulli harmonic gamma beta zeta pi E I oo N simplify expand factor cancel together apart collect solve linsolve nonlinsolve solveset reduce_inequalities diff integrate limit summation product residue series conjugate re im transpose det eye zeros ones diag gcd lcm mod_inverse isprime nextprime prevprime primerange factorint totient divisors divisor_count degree Poly resultant discriminant Function Derivative Integral Sum Product FiniteSet Interval Union Intersection Complement EmptySet Reals Integers Piecewise dsolve simplify_logic kronecker_symbol legendre_symbol'.split())
 MATH_NAMES = set('sqrt isqrt gcd lcm factorial comb perm sin cos tan asin acos atan atan2 sinh cosh tanh exp log log2 log10 ceil floor fabs fsum prod pi e inf isclose'.split())
 METHODS = set('subs diff integrate simplify expand factor cancel together apart collect evalf doit det inv eigenvals eigenvects charpoly nullspace rank rref LUsolve diagonalize trace transpose adjugate dot cross norm row col jacobian applyfunc as_real_imag as_numer_denom coeff all_coeffs degree factor_list count_ops has equals is_integer is_real is_positive is_negative is_zero free_symbols shape T rows cols numerator denominator append extend count index items keys values sort reverse copy'.split())
-BUILTINS = set('abs all any bool dict enumerate float int len list map max min pow print range reversed round set sorted str sum tuple zip'.split())
+BUILTINS = set('abs all any bool dict enumerate float int len list map max min pow print range reversed round set sorted sum tuple zip'.split())
 BANNED = set('open exec eval compile globals locals vars dir getattr setattr delattr hasattr type object super input help breakpoint memoryview __import__'.split())
 
 
@@ -27,7 +28,43 @@ def validate(code: str) -> ast.Module:
     tree = ast.parse(code)
     if len(list(ast.walk(tree))) > 2500:
         raise ValueError('code complexity limit')
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    reserved = {'print', 'symbols', 'Symbol', 'Function', 'Integer', 'Float', 'Rational', 'Fraction'}
     for n in ast.walk(tree):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) and n.id in reserved:
+            raise ValueError('cannot rebind protected function')
+        if isinstance(n, (ast.FunctionDef, ast.arg)) and getattr(n, 'name', getattr(n, 'arg', None)) in reserved:
+            raise ValueError('cannot shadow protected function')
+        if isinstance(n, ast.alias) and n.asname in reserved and n.asname != n.name:
+            raise ValueError('cannot alias protected function')
+        if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store):
+            raise ValueError('cannot mutate attributes')
+        if isinstance(n, ast.JoinedStr):
+            parent = parents.get(n)
+            if not (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and parent.func.id == 'print'):
+                raise ValueError('formatted strings only allowed in print')
+        if isinstance(n, ast.Constant) and isinstance(n.value, str):
+            parent = parents.get(n)
+            # SymPy implicitly parses strings in many functions. Permit strings
+            # only as safe constructor names/numbers or direct print labels.
+            target = ''
+            if isinstance(parent, ast.Call):
+                target = getattr(parent.func, 'id', getattr(parent.func, 'attr', ''))
+            elif isinstance(parent, ast.keyword):
+                if '__' not in n.value and re.fullmatch(r'[A-Za-z0-9_ +:,-]*', n.value):
+                    continue
+            elif isinstance(parent, ast.JoinedStr):
+                continue
+            if target == 'print':
+                pass
+            elif target in {'symbols', 'Symbol', 'Function'}:
+                if '__' in n.value or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_ ,:]*', n.value):
+                    raise ValueError('unsafe symbol name')
+            elif target in {'Integer', 'Float', 'Rational', 'Fraction'}:
+                if not re.fullmatch(r'[0-9eE.+/ -]+', n.value):
+                    raise ValueError('unsafe numeric literal')
+            else:
+                raise ValueError('expression strings are unsupported; construct expressions directly')
         if isinstance(n, (ast.ClassDef, ast.With, ast.AsyncWith, ast.AsyncFunctionDef,
                           ast.Await, ast.Global, ast.Nonlocal, ast.Delete)):
             raise ValueError('unsupported statement')
