@@ -1,1 +1,1 @@
-R2 budgeted tools initial paired validation; 34 fixed stratified regression items; no official submission.
+Repeat the same preselected 34-item paired regression after worker security hardening and deployment preflight. No official submissions.

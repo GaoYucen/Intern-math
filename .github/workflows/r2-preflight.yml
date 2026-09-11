@@ -1,0 +1,32 @@
+name: r2-preflight
+on:
+  push:
+    branches: [r2-budgeted-tools-v1]
+    paths: ['user_agent.py','r2_agent.py','math_tools.py','r1_agent.py','tests/**','.github/workflows/r2-preflight.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt pytest
+      - name: All unit tests, including preserved R1 contracts
+        run: python -m pytest -q
+      - name: Minimal candidate package (not automatically submitted)
+        run: |
+          mkdir -p dist/candidate
+          cp user_agent.py r2_agent.py math_tools.py requirements.txt dist/candidate/
+          echo 'Select intern-s2-preview-397b. This is a candidate; consult the paired report before submission.' > dist/candidate/DEPLOYMENT.txt
+          echo "Source commit: $GITHUB_SHA" >> dist/candidate/DEPLOYMENT.txt
+          cd dist/candidate && sha256sum *.py requirements.txt > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r2-candidate-${{ github.sha }}
+          path: dist/candidate
+          retention-days: 14
