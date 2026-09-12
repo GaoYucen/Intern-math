@@ -1,0 +1,25 @@
+{
+  "auditor": "ChatGPT offline review of actual outputs; not independent human/formal certification",
+  "policy": "Core requested result and required proof/method; ancillary defects disclosed; ambiguous items retained without credit. Development-selected, post-hoc, not an official-score estimate.",
+  "r22": {
+    "commit": "e1cae17d01bc256107a461e2a0fa04c6cd8e13b6", "run": 34662596440,
+    "ids": [47,177,192,200,214,241,250,263,272,289,150,209,33],
+    "accepted": [47,200,214,241,250,263,272,289,150,209,33], "rejected": [177], "ambiguous": [192],
+    "responses":13,"explicit_final":13,"calls":26,"completion_tokens":27736,"truncated_calls":3,"mean_seconds":43.28890252923076,
+    "same_code_worker_comparison":{"n":11,"old_no_error":4,"new_no_error":10,"new_no_printed_result":2},
+    "ancillary_defects":{"241":"Valid requested bound, but unsupported claim of sharpest bound; Chebyshev gives a tighter bound.","250":"Correct executed method/root, but full-precision residual mislabeled at rounded display and unsupported bracket statement."}
+  },
+  "r23": {
+    "commit":"ce56db565e1b3a3035e5cbbaf0f7c342ce31cb60","run":34663369021,"artifact":10287464568,
+    "ids":[177,289,33],"accepted":[177,289,33],"rejected":[],"unresolved":[],
+    "calls":5,"completion_tokens":6639,"truncated_calls":1,"tool_runs":1,"tool_success":1,
+    "mean_seconds":58.57833111366667,"max_seconds":161.427052193,
+    "177_tool_value":10.0657784357,"177_final_value":10.0658,"177_independent_value":10.065778435728276,
+    "tests":{"passed":139,"seconds":10.75,"job":103470286937},
+    "record_hashes":{"177":"46e63f59fb3f4015d0228d4cdd70b096e0cfa1b57cd89dfef8a53fd1e8219992","289":"3479bb89e7929929f5a492abe8058b318a4a57839d0e9329c48d449746419a5a","33":"a6c08018d4cf0b3abfe4355413919fe1dc1cca8384ef4bfd97afe328d0419582"}
+  },
+  "limitations":"Different version/cohort results MUST NOT be combined into single-version accuracy. No fresh holdout or official evaluation. A fixed-response replay verifies control flow only.",
+  "official_submissions_this_continuation":0,
+  "new_question_solves":25,"distinct_development_questions":13,"new_semantic_calls":53,
+  "preferred_engineering_candidate":"R2.3; local evidence only, no promised competition score"
+}
