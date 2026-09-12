@@ -1,3 +1,4 @@
+from copy import deepcopy
 import r2_agent
 
 def test_incomplete_numeric_reply_retains_tool_opportunity(monkeypatch):
@@ -5,7 +6,8 @@ def test_incomplete_numeric_reply_retains_tool_opportunity(monkeypatch):
     class Client:
         def __init__(self):self.calls=[]
         def chat(self,**kwargs):
-            self.calls.append(kwargs)
+            # Capture the request at send time, not a later-mutated conversation.
+            self.calls.append(deepcopy(kwargs))
             return next(replies)
     monkeypatch.setattr(r2_agent,'run_math',lambda code:{'ok':True,'stdout':'2'})
     c=Client();out=r2_agent.ReasoningAgent(c).solve('calculate',{})

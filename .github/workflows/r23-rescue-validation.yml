@@ -1,4 +1,5 @@
 name: r23-rescue-validation
+# Retry after correcting test request snapshots; no solver or budget change.
 on:
   push:
     branches: [r2-budgeted-tools-v1]
