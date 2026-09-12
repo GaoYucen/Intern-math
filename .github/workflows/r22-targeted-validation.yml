@@ -1,0 +1,66 @@
+name: r22-targeted-validation
+on:
+  push:
+    branches: [r2-budgeted-tools-v1]
+    paths: ['.github/workflows/r22-targeted-validation.yml']
+permissions:
+  contents: read
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt pytest
+      - name: All tests and immutable previous worker
+        run: |
+          git show 945f56ec1a54e7c7c9740b2764424f1d5a92899a:math_tools.py > _math_tools_before.py
+          python -m pytest -q
+          python scripts/verify_r2_math.py
+      - name: Frozen 9 targeted questions and 4 proof regressions
+        env:
+          INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+          INTERN_MODEL: intern-s2-preview-397b
+          INTERN_CONNECT_TIMEOUT: '20'
+          INTERN_READ_TIMEOUT: '240'
+          INTERN_TRANSPORT_ATTEMPTS: '2'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python -u - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0,str(Path.cwd()/'scripts'))
+          import r21_tool_diagnostic as d
+          d.IDS=[47,177,192,200,214,241,250,263,272,289,150,209,33]
+          d.OUT=d.ROOT/'reports/r22_targeted'
+          original_save=d.save
+          def save(path,obj):
+              if path.name=='manifest.json':
+                  obj['selection']='Nine previously tool-using questions plus four previously accepted proof regressions; all IDs frozen in workflow before inference.'
+                  obj['policy']='R2.2 changes allowed numerical packages/docstrings, early-code instructions, rounding checks, and bounded fresh answer-first closure. Call ceilings/model/thinking/temperature unchanged. Not a tool-only solver ablation.'
+                  obj['limitations']='Development-selected test, no new holdout. Identical-code worker replay isolates executor compatibility only, not solver quality. Question 192 remains ambiguous.'
+              original_save(path,obj)
+          d.save=save
+          d.main()
+          PY
+      - name: Export minimal candidate and source hashes
+        if: success()
+        run: |
+          mkdir -p dist/candidate
+          cp user_agent.py r2_agent.py math_tools.py requirements.txt dist/candidate/
+          echo "R2.2 experimental candidate. Source commit $GITHUB_SHA. Select intern-s2-preview-397b. Review targeted results before official submission." > dist/candidate/DEPLOYMENT.txt
+          (cd dist/candidate && sha256sum *.py requirements.txt > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r22-targeted-${{ github.run_id }}
+          path: |
+            reports/r22_targeted
+            dist/candidate
+          retention-days: 14
