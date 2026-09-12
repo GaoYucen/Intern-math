@@ -1,4 +1,4 @@
-"""R2.2: early mathematical computation and bounded, answer-preserving closure."""
+"""R2.3: preserve the remaining tool opportunity after an incomplete reply."""
 from __future__ import annotations
 from dataclasses import dataclass
 import json,re,time
@@ -120,7 +120,10 @@ class ReasoningAgent:
                 trace.append({'step':'math_tool','content':{'run':tools,'ok':result['ok'],'error_type':result.get('error'),'output_chars':len(result.get('stdout',''))}})
                 messages.append({'role':'user','content':'Mathematical Python worker returned:\n'+json.dumps(result,ensure_ascii=False)+'\nUse the actual result to finish ALL requested parts concisely, normally under 500 words. Do not repeat the whole derivation. If code failed, correct it using the permitted packages. Check numerical residuals and rounding before committing. Execution success does not validate the mathematical setup.'})
             else:
-                messages.append({'role':'user','content':'The response is missing a clearly completed final answer. Finish the mathematics and state the actual requested answer, preserving necessary proof and all subparts. Do not simply restate the question. No code.'})
+                if c.tools and not closing and tools<c.max_tool_runs:
+                    messages.append({'role':'user','content':'The previous response is unfinished and no calculation was executed. Do NOT restart the derivation or hand-estimate numerical values. If a numerical step remains, immediately give a short Python block using the formula already derived and the permitted packages; print the requested result with adequate precision and a residual check. At most 80 words before the code. If this is a pure proof, finish the essential argument and FINAL_ANSWER instead.'})
+                else:
+                    messages.append({'role':'user','content':'Finish the existing argument concisely and state the actual FINAL_ANSWER. Preserve every requested part. No code.'})
         final=best or partial or 'Unable to obtain a mathematical answer within the available model calls.'
         trace.append({'step':'finalize','content':{'calls':calls,'tool_runs':tools,'complete':complete(final),'fallback':not bool(best),'seconds':round(time.monotonic()-started,3)}})
         return {'final_response':final,'trace':trace}

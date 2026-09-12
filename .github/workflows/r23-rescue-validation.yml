@@ -1,0 +1,65 @@
+name: r23-rescue-validation
+on:
+  push:
+    branches: [r2-budgeted-tools-v1]
+    paths: ['.github/workflows/r23-rescue-validation.yml']
+permissions:
+  contents: read
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt pytest
+      - name: Full unit suite and previous worker
+        run: |
+          git show 945f56ec1a54e7c7c9740b2764424f1d5a92899a:math_tools.py > _math_tools_before.py
+          python -m pytest -q
+      - name: One remaining numerical failure and two proof controls
+        env:
+          INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+          INTERN_MODEL: intern-s2-preview-397b
+          INTERN_CONNECT_TIMEOUT: '20'
+          INTERN_READ_TIMEOUT: '240'
+          INTERN_TRANSPORT_ATTEMPTS: '2'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python -u - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0,str(Path.cwd()/'scripts'))
+          import r21_tool_diagnostic as d
+          d.IDS=[177,289,33]
+          d.OUT=d.ROOT/'reports/r23_rescue'
+          original_save=d.save
+          def save(path,obj):
+              if path.name=='manifest.json':
+                  obj['selection']='Remaining numerical failure177 plus proof controls289,33, frozen before inference.'
+                  obj['policy']='Only incomplete-without-code followup changed from forbidding code to allowing remaining tool budget. Executor/model/temperature/token limits unchanged from R2.2.'
+                  obj['limitations']='Failure-selected regression, not holdout. Cannot combine these outputs with older outputs into a single-version accuracy claim.'
+              original_save(path,obj)
+          d.save=save
+          d.main()
+          PY
+      - name: Candidate package
+        if: success()
+        run: |
+          mkdir -p dist/candidate
+          cp user_agent.py r2_agent.py math_tools.py requirements.txt dist/candidate/
+          echo "R2.3 candidate. Source $GITHUB_SHA. Select intern-s2-preview-397b. No official submission was performed." > dist/candidate/DEPLOYMENT.txt
+          (cd dist/candidate && sha256sum *.py requirements.txt > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r23-rescue-${{ github.run_id }}
+          path: |
+            reports/r23_rescue
+            dist/candidate
+          retention-days: 14
