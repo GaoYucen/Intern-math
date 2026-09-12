@@ -1,0 +1,60 @@
+name: r2-public-sample-smoke
+on:
+  push:
+    branches: [r2-budgeted-tools-v1]
+    paths: ['.github/workflows/r2-public-sample-smoke.yml']
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Three public examples via actual competition entry, not official submission
+        env:
+          INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+          INTERN_MODEL: intern-s2-preview-397b
+          INTERN_THINKING_MODE: '1'
+          INTERN_READ_TIMEOUT: '90'
+          INTERN_TRANSPORT_ATTEMPTS: '1'
+        run: |
+          python -u - <<'PY'
+          import json,time
+          from pathlib import Path
+          from llm_client import InternChatClient
+          from user_agent import ReasoningAgent
+          from scripts.r2_eval import strict
+          samples=[
+            {'idx':0,'problem':r'设$\mathbb{F}_{81}$为$81$元的有限域。$T=\{\alpha\in\mathbb{F}_{81}|\mathbb{F}_{81}=\mathbb{F}_3(\alpha)\}$。求$T$中元素的个数。','answer':'72','answer_type':'number'},
+            {'idx':1,'problem':r'Let $f_{\text{inv}} : \mathbb{R} \to \mathbb{R}$ be the inverse function of $f(x) = x^7 + x^5 + 3$. Put $F(x)=\int_x^{-17} f_{\text{inv}}(t)dt$. Find the numerical value of $F\'(5)$.','answer':'-1','answer_type':'number'},
+            {'idx':2,'problem':r'设函数 $ f(z) = \frac{1}{(z-1)(z-2)^2(z-3)^3} $，其中 $ z $ 为复变量。求 $ f(z) $ 在简单极点 $ z = 1 $ 处的留数。','answer':'-1/8','answer_type':'number'}]
+          rows=[]
+          out=Path('reports/r2_public_samples');out.mkdir(parents=True,exist_ok=True)
+          for item in samples:
+            t=time.monotonic(); agent=ReasoningAgent(client=InternChatClient())
+            assert agent.config.thinking_mode is False
+            try:
+              result=agent.solve(item['problem'],{'idx':item['idx']})
+              correct=strict(item,result['final_response'])
+              row={'idx':item['idx'],'correct':correct,'seconds':time.monotonic()-t,**result}
+            except Exception as exc:
+              row={'idx':item['idx'],'correct':False,'error_type':type(exc).__name__}
+            rows.append(row)
+            (out/f"{item['idx']}.json").write_text(json.dumps(row,ensure_ascii=False,indent=2))
+            print(json.dumps({k:row.get(k) for k in ['idx','correct','seconds','error_type']}),flush=True)
+          summary={'n':3,'correct':sum(r['correct'] is True for r in rows),'unresolved':sum(r['correct'] is None for r in rows),'note':'Three official PUBLIC examples; live API smoke only. Not a hidden-test score.'}
+          (out/'summary.json').write_text(json.dumps(summary,indent=2))
+          print('SUMMARY',json.dumps(summary),flush=True)
+          assert summary['correct']==3,summary
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r2-public-samples-${{ github.run_id }}
+          path: reports/r2_public_samples
+          retention-days: 14

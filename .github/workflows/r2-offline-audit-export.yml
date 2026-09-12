@@ -1,0 +1,34 @@
+name: r2-offline-audit-export
+on:
+  push:
+    branches: [r2-budgeted-tools-v1]
+    paths: ['.github/workflows/r2-offline-audit-export.yml']
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f7a8ea7a5ddec396d1810890a13ac5fe1abed642
+          persist-credentials: false
+      - name: Export only public regression data and source
+        run: |
+          mkdir -p audit_export
+          cp -r tests scripts benchmark audit_export/
+          cp user_agent.py r2_agent.py r1_agent.py math_tools.py llm_client.py main.py requirements.txt audit_export/
+          cp data/benchmark_v1/gold.jsonl audit_export/gold.jsonl
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          root=Path('audit_export')
+          out={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob('*') if p.is_file()}
+          (root/'SOURCE_HASHES.json').write_text(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r2-offline-audit-source
+          path: audit_export
+          retention-days: 14

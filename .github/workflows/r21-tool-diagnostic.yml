@@ -1,0 +1,44 @@
+name: r21-tool-diagnostic
+on:
+  push:
+    branches: [r2-budgeted-tools-v1]
+    paths: ['.github/workflows/r21-tool-diagnostic.yml']
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt pytest
+      - name: Freeze solver policy and test all code
+        run: |
+          git diff --exit-code 945f56ec1a54e7c7c9740b2764424f1d5a92899a -- user_agent.py r2_agent.py llm_client.py
+          git show 945f56ec1a54e7c7c9740b2764424f1d5a92899a:math_tools.py > _math_tools_before.py
+          python -m pytest -q
+      - name: Nine public questions, identical-code worker comparison
+        env:
+          INTERN_API_KEY: ${{ secrets.INTERN_API_KEY }}
+          INTERN_MODEL: intern-s2-preview-397b
+          INTERN_READ_TIMEOUT: '240'
+          INTERN_CONNECT_TIMEOUT: '20'
+          INTERN_TRANSPORT_ATTEMPTS: '2'
+          INTERN_RETRY_BACKOFF_MIN: '3'
+          INTERN_RETRY_BACKOFF_MAX: '8'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          test -n "$INTERN_API_KEY"
+          python scripts/r21_tool_diagnostic.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r21-tool-diagnostic-${{ github.run_id }}
+          path: reports/r21_tool_diagnostic
+          retention-days: 14

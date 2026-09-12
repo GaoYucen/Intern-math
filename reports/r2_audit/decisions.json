@@ -1,0 +1,13 @@
+{
+  "source_run":34625550536,
+  "source_commit":"945f56ec1a54e7c7c9740b2764424f1d5a92899a",
+  "gold_sha256":"c6b9c500e1af9a03c145e682f5acf8e07b8555130a306edc15d46bac095f2991",
+  "auditor":"ChatGPT offline mathematical review, not external human review or formal verification",
+  "policy":"Requested result checked for result questions; required proofs/methods must be adequate. Ambiguous and conditional questions stay in denominator without accepted credit. Ancillary derivation errors are flagged in report. Post-hoc, not blinded, not an official score estimate.",
+  "columns":["idx","r1_off","r2"],
+  "rows":[[226,"accepted","accepted"],[284,"rejected","accepted"],[132,"accepted","accepted"],[223,"accepted","accepted"],[224,"accepted","accepted"],[286,"ambiguous","ambiguous"],[239,"accepted","accepted"],[69,"accepted","accepted"],[157,"accepted","accepted"],[309,"accepted","accepted"],[289,"accepted","accepted"],[150,"accepted","accepted"],[281,"accepted","accepted"],[163,"conditional","conditional"],[170,"rejected","rejected"],[90,"rejected","accepted"],[250,"rejected","rejected"],[263,"rejected","accepted"],[177,"rejected","rejected"],[272,"accepted","accepted"],[11,"rejected","rejected"],[322,"rejected","rejected"],[65,"accepted","accepted"],[121,"rejected","accepted"],[4,"accepted","accepted"],[241,"accepted","accepted"],[200,"accepted","accepted"],[302,"conditional","conditional"],[192,"ambiguous","ambiguous"],[214,"accepted","accepted"],[279,"accepted","accepted"],[47,"accepted","accepted"],[209,"accepted","accepted"],[33,"accepted","accepted"]],
+  "summary":{"r1_off":{"accepted":21,"rejected":9,"ambiguous":2,"conditional":2},"r2":{"accepted":25,"rejected":5,"ambiguous":2,"conditional":2}},
+  "gains":[284,90,263,121],"losses":[],
+  "terminal_number_correct_but_method_not_accepted":{"250":["r1_off","r2"],"263":["r1_off"]},
+  "unchanged":"Original gold and original reports retained. Review metadata never enters inference. All 34 questions and both outputs were examined; prototype run not regraded."
+}

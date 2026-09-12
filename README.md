@@ -1,100 +1,31 @@
-# Intern-math
+# Intern-math — R2.3 candidate
 
-A baseline-first codebase for the Intern mathematical reasoning challenge.
+The current preferred engineering candidate is **R2.3**, tested at commit `ce56db565e1b3a3035e5cbbaf0f7c342ce31cb60`. This is not an official high-score claim. No official submission or AtomGit synchronization has been performed by these workflows.
 
-The current priority is **official-evaluation robustness before agent complexity**: freeze a trustworthy competition-shaped proxy benchmark, restore a reproducible single-call Intern-S2 baseline, diagnose delivery/truncation failures, and only then add adaptive compute, verification, tools, or selective rescue when they demonstrate controlled gains.
+## Deployment
 
-## Current project stage: R1 Robust Baseline
+Entry: `user_agent.py:ReasoningAgent`, initialized with the official injected client. Choose **intern-s2-preview-397b** in the competition UI. Thinking-off is fixed in code, independent of workflow environment variables. Temperature0.1; at most three calls with 4096/4096/2048 completion ceilings; at most two mathematical tool runs.
 
-The active research branch is `r1-robust-baseline`.
+The candidate asks for numerical code early, executes selected standard mathematical functions, checks precision and requested numerical methods, and retains a remaining tool opportunity after an unfinished answer. Complete answers return immediately. There is no default verifier or cross-question state. A final bounded closure can retain the actual tool result and original problem without repeating an entire abandoned reasoning chain.
 
-R1 is intentionally restricted to exactly one solver request per problem:
+`math_tools.py` exposes restricted math/SymPy/NumPy/SciPy/mpmath facades with CPU, memory, wall-time and output limits, and a sanitized worker environment. This is defense in depth, not a replacement for the official OS sandbox. Requirements are pinned where relevant.
 
-- model: `intern-s2-preview-397b` in the R1 evaluation workflows;
-- thinking mode: on;
-- temperature: `0.0`;
-- maximum completion budget: `8192` tokens;
-- Agent layer: exactly one `client.chat()` call;
-- Client default: `retry=1`, i.e. one HTTP attempt;
-- no second-pass finalizer;
-- no verifier / judge in the participant path;
-- no self-refine or multi-agent path;
-- the complete non-empty primary response is preserved as `final_response`;
-- the prompt asks the solver to terminate with `FINAL_ANSWER: ...` and to stop exploring after obtaining a well-justified answer.
+## Completed validation — keep versions and cohorts separate
 
-This design follows the official-evaluation diagnosis: the previous H4 Hybrid used 204 requests for 112 problems, produced 42 invalid answers and scored 10.71%, whereas an earlier 397B single-call submission used 112 requests, had zero invalid answers and scored 13.39%. R1 therefore treats delivery stability and compute allocation as the first bottleneck to fix.
+- Original R2 `945f56e`, existing34-question paired regression: raw report21/34 versus R1-off21/34. Offline ChatGPT review of all saved answers found25/34 acceptable for originalR2 versus21/34 for R1, keeping ambiguous/conditional items in the denominator. This was post-hoc, not blind external verification or an official-score estimate.
+- R2.1 run34661560207, nine development-selected tool cases: executor compatibility improved but numerical/closure failures remained.
+- R2.2 `e1cae17`, run34662596440, thirteen development-selected questions:13 responses,13 explicit finals; reviewed core results/required arguments acceptable on11, one numerical error177, one ambiguous source192. Same11 snippets: old executor4 no-error executions versus new10 (including two no-printed-result runs).26model calls,27736completion tokens.
+- R2.3 `ce56db5`, run34663369021: targeted item177 plus proof controls289 and33, all three reviewed as acceptable.177 now executes Brent root finding and returns10.0658, matching independent10.0657784357. Five model calls,6639completion tokens, one truncated primary call subsequently recovered. Do not merge these three replies with R2.2 replies to invent a single-version aggregate score.
+- Final full unit suite: **139 passed**. Packaged entry and file hashes verified. Initial R2.3 CI failed before API use because a test captured mutable request lists; the test was fixed to snapshot at send time without changing solver logic.
 
-## Frozen proxy benchmark
+All accuracy reviews above are ChatGPT offline reviews of actual saved model outputs, not external human certification. Some accepted requested answers have ancillary prose defects, documented in the reports. No fresh holdout or official hidden evaluation has been completed for this candidate.
 
-`Benchmark-v1` is frozen and contains:
+## Reports
 
-- 340 problems total;
-- 17 working domains, exactly 20 problems per domain;
-- competition-shaped model input containing only `idx` and `problem`;
-- gold answers and source metadata stored separately for local evaluation;
-- frozen input / gold hashes recorded in `data/benchmark_v1/manifest.json`.
+Current completion record: `docs/R23_COMPLETION_20260912.md`.
+Full original34-question audit rationale: `docs/R2_OFFLINE_AUDIT_20260912.md` and `reports/r2_audit/decisions.json`.
+Targeted runtime/review summaries: `reports/r2_audit/r22_r23_results.json`.
+Independent mathematical checks: `python scripts/verify_r2_math.py`.
+Explicit-reference offline scoring helpers: `scripts/audited_answer_checks.py` (not silently substituted into historical reports).
 
-```text
-data/benchmark_v1/
-  input.jsonl                 # feed this to main.py
-  gold.jsonl                  # local evaluator only; never feed to the agent
-  manifest.json               # frozen counts + SHA256 hashes
-  auto_review_report.json     # automated review summary
-  approved_pool_audit.json    # audited candidate coverage
-  source_coverage.json        # source-pool coverage before balancing
-```
-
-Internal benchmark scores are diagnostic proxies, not estimates of the official hidden-set score. The main acceptance signals for R1 are API success, one-request invariants, final-answer delivery, truncation/closure behavior, and regression relative to the same frozen benchmark.
-
-## Local R1 run
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-export INTERN_API_KEY=YOUR_TOKEN
-export INTERN_MODEL=intern-s2-preview-397b
-export INTERN_THINKING_MODE=1
-export AGENT_MAX_TOKENS=8192
-export AGENT_TEMPERATURE=0.0
-export LOCAL_MAX_CONCURRENCY=2
-
-python main.py \
-  --input_file data/benchmark_v1/input.jsonl \
-  --output_dir outputs/r1
-
-python scripts/evaluate_outputs.py \
-  --benchmark data/benchmark_v1/gold.jsonl \
-  --output_dir outputs/r1 \
-  --report_dir reports/r1
-```
-
-## R1 acceptance workflows
-
-The R1 branch uses a gated evaluation chain:
-
-1. `r1-robust-smoke` — 17-domain objective smoke test. It validates API success, unit tests, explicit final-answer behavior, non-empty responses, and the exactly-one-request trace invariant.
-2. `r1-long-reasoning-stress` — 40-item trusted long-reasoning stress set with fixed 397B / thinking-on / 8K / temperature-0 configuration. It is explicitly triggered through `experiments/r1_long_stress.trigger`.
-3. `r1-full-benchmark` — complete 340-item Benchmark-v1 run. It is intentionally gated behind `experiments/r1_full_benchmark.trigger` and should only be launched after the long-reasoning stress result is accepted.
-
-For Actions-based runs, configure the repository secret:
-
-```text
-INTERN_API_KEY
-```
-
-Do not commit API keys to the repository.
-
-## Experimental roadmap
-
-The project follows four stages:
-
-- **R1 — Robust Baseline:** single call, answer preservation, deterministic delivery diagnostics, invalid/truncation autopsy.
-- **R2 — Adaptive Reasoning:** difficulty/risk profiling and controlled 2K/4K/8K compute allocation with active early closure.
-- **R3 — Verified Rescue:** lightweight checking, selective fresh rescue, and targeted SymPy/Python/Z3 routing only for high-risk problems.
-- **R4 — Test-Time Search:** adaptive sampling, candidate normalization/consensus, specialist solvers, and hidden-distribution calibration for the 50→70 regime.
-
-Do not reintroduce default finalizers, solver+judge loops, or generic multi-agent orchestration before R1 has passed its acceptance chain.
-
-Dataset construction details are in `docs/DATASET_PIPELINE.md`.
+Historical R1 tests target its unchanged snapshot. `main`, R1 and existing submission branches were not modified by this continuation. PR#1 remains a draft. The minimal candidate contains only runtime files, requirements, deployment note and hashes; evaluation references and review decisions must never be included in the participant's inference path.
