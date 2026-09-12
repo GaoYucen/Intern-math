@@ -15,8 +15,8 @@ import subprocess
 import sys
 import tempfile
 
-SYMPY_NAMES = set('Symbol symbols Rational Integer Float Matrix ImmutableMatrix Eq Ne Lt Le Gt Ge And Or Not sqrt root real_root sin cos tan asin acos atan atan2 sinh cosh tanh exp log Abs sign floor ceiling factorial factorial2 binomial ff rf fibonacci lucas bell bernoulli harmonic gamma beta zeta pi E I oo N simplify expand factor cancel together apart collect solve linsolve nonlinsolve solveset reduce_inequalities diff integrate limit summation product residue series conjugate re im transpose det eye zeros ones diag gcd lcm mod_inverse isprime nextprime prevprime primerange factorint totient divisors divisor_count degree Poly resultant discriminant Function Derivative Integral Sum Product FiniteSet Interval Union Intersection Complement EmptySet Reals Integers Piecewise dsolve simplify_logic kronecker_symbol legendre_symbol'.split())
-MATH_NAMES = set('sqrt isqrt gcd lcm factorial comb perm sin cos tan asin acos atan atan2 sinh cosh tanh exp log log2 log10 ceil floor fabs fsum prod pi e inf isclose'.split())
+SYMPY_NAMES = set('erf erfc nroots Symbol symbols Rational Integer Float Matrix ImmutableMatrix Eq Ne Lt Le Gt Ge And Or Not sqrt root real_root sin cos tan asin acos atan atan2 sinh cosh tanh exp log Abs sign floor ceiling factorial factorial2 binomial ff rf fibonacci lucas bell bernoulli harmonic gamma beta zeta pi E I oo N simplify expand factor cancel together apart collect solve linsolve nonlinsolve solveset reduce_inequalities diff integrate limit summation product residue series conjugate re im transpose det eye zeros ones diag gcd lcm mod_inverse isprime nextprime prevprime primerange factorint totient divisors divisor_count degree Poly resultant discriminant Function Derivative Integral Sum Product FiniteSet Interval Union Intersection Complement EmptySet Reals Integers Piecewise dsolve simplify_logic kronecker_symbol legendre_symbol'.split())
+MATH_NAMES = set('erf erfc expm1 log1p sqrt isqrt gcd lcm factorial comb perm sin cos tan asin acos atan atan2 sinh cosh tanh exp log log2 log10 ceil floor fabs fsum prod pi e inf isclose'.split())
 METHODS = set('subs diff integrate simplify expand factor cancel together apart collect evalf doit det inv eigenvals eigenvects charpoly nullspace rank rref LUsolve diagonalize trace transpose adjugate dot cross norm row col jacobian applyfunc as_real_imag as_numer_denom coeff all_coeffs degree factor_list count_ops has equals is_integer is_real is_positive is_negative is_zero free_symbols shape T rows cols numerator denominator append extend count index items keys values sort reverse copy'.split())
 BUILTINS = set('abs all any bool dict enumerate float int len list map max min pow print range reversed round set sorted sum tuple zip'.split())
 BANNED = set('open exec eval compile globals locals vars dir getattr setattr delattr hasattr type object super input help breakpoint memoryview __import__'.split())
@@ -41,8 +41,20 @@ def validate(code: str) -> ast.Module:
             raise ValueError('cannot mutate attributes')
         if isinstance(n, ast.JoinedStr):
             parent = parents.get(n)
-            if not (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and parent.func.id == 'print'):
-                raise ValueError('formatted strings only allowed in print')
+            root = n
+            if isinstance(parent, ast.FormattedValue) and parent.format_spec is n:
+                # CPython represents the literal '.6f' as another JoinedStr.
+                # Accept bounded literal numeric format specs, never dynamic ones.
+                if not all(isinstance(v, ast.Constant) and isinstance(v.value, str) for v in n.values):
+                    raise ValueError('dynamic format specs are unsupported')
+                spec = ''.join(v.value for v in n.values)
+                if not re.fullmatch(r'[+ -]?(?:[0-9]{1,2})?(?:\.[0-9]{1,2})?[eEfFgGd%]?', spec):
+                    raise ValueError('unsupported numeric format spec')
+                root = parents.get(parent)
+                parent = parents.get(root)
+            if not (isinstance(root, ast.JoinedStr) and isinstance(parent, ast.Call)
+                    and isinstance(parent.func, ast.Name) and parent.func.id == 'print'):
+                raise ValueError('formatted strings only allowed directly in print')
         if isinstance(n, ast.Constant) and isinstance(n.value, str):
             parent = parents.get(n)
             # SymPy implicitly parses strings in many functions. Permit strings
